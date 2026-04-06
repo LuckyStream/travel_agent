@@ -146,6 +146,15 @@ export function normalizeItinerary(raw: unknown, destination: string): Itinerary
         toNum(block.review_count) ??
         toNum((block as { user_ratings_total?: unknown }).user_ratings_total);
 
+      const addrRaw =
+        block.address ??
+        block.formatted_address ??
+        (block as { formattedAddress?: unknown }).formattedAddress ??
+        block.vicinity;
+      const address = typeof addrRaw === "string" ? addrRaw.trim() : "";
+      const pidRaw = block.place_id ?? (block as { placeId?: unknown }).placeId;
+      const placeId = typeof pidRaw === "string" ? pidRaw.trim() : "";
+
       items.push({
         id: slugId("item", index++),
         day: dayNum,
@@ -154,6 +163,8 @@ export function normalizeItinerary(raw: unknown, destination: string): Itinerary
         description: description || `Activity in ${destination}`,
         lat: Number.isFinite(lat) ? lat : 0,
         lng: Number.isFinite(lng) ? lng : 0,
+        ...(address ? { address } : {}),
+        ...(placeId ? { placeId } : {}),
         rating:
           rating !== null && rating >= 0 && rating <= 5 ? Math.round(rating * 10) / 10 : null,
         reviewCount:

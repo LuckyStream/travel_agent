@@ -18,10 +18,22 @@ export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: 
 
 /** Rough urban driving pace when Google routing is unavailable (m/s). */
 const ESTIMATED_URBAN_DRIVING_MPS = 25_000 / 3600;
+/** Mixed / longer legs — better than urban-only when Distance Matrix is unavailable. */
+const ESTIMATED_MIXED_DRIVING_MPS = 45_000 / 3600;
 
 export function estimateDriveDurationSeconds(distanceMeters: number): number {
   if (distanceMeters <= 0) return 0;
   return Math.max(60, Math.round(distanceMeters / ESTIMATED_URBAN_DRIVING_MPS));
+}
+
+/**
+ * Road distance ~1.4× straight-line; speed blends urban vs faster mixed driving by crow distance.
+ */
+export function estimateDriveDurationFromStraightLineMeters(straightMeters: number): number {
+  if (straightMeters <= 0) return 0;
+  const roadMeters = straightMeters * 1.4;
+  const speedMps = straightMeters > 15_000 ? ESTIMATED_MIXED_DRIVING_MPS : ESTIMATED_URBAN_DRIVING_MPS;
+  return Math.max(60, Math.round(roadMeters / speedMps));
 }
 
 export function formatDuration(seconds: number): string {

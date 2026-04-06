@@ -1,4 +1,4 @@
-import type { DiningTag, InterestTag } from "./types";
+import type { DiningTag, InterestTag, ItineraryItem } from "./types";
 
 /** Google Nearby Search maximum radius (meters). Requested 80km is clamped to this API limit. */
 export const GOOGLE_NEARBY_MAX_RADIUS_METERS = 50_000;
@@ -29,6 +29,7 @@ type NearbyApiResult = {
   rating?: number;
   user_ratings_total?: number;
   vicinity?: string;
+  formatted_address?: string;
   geometry?: { location?: { lat?: number; lng?: number } };
   types?: string[];
 };
@@ -38,6 +39,17 @@ type NearbyApiResponse = {
   results?: NearbyApiResult[];
   error_message?: string;
   next_page_token?: string;
+};
+
+type PlaceDetailsResponse = {
+  status: string;
+  result?: {
+    place_id?: string;
+    formatted_address?: string;
+    geometry?: { location?: { lat?: number; lng?: number } };
+    name?: string;
+  };
+  error_message?: string;
 };
 
 /** True when interests justify regional (wider) search around the destination. */
@@ -296,9 +308,172 @@ export function formatVerifiedPlacesForPrompt(places: GooglePlaceCandidate[], ma
     const kw = p.sourceKeyword ? ` [search: ${p.sourceKeyword}]` : "";
     return (
       `${i + 1}. "${p.name}" | ${p.rating.toFixed(1)}★ | ${p.userRatingsTotal} reviews | ` +
-      `${p.address} | lat ${p.lat.toFixed(6)}, lng ${p.lng.toFixed(6)} | types: ${types}${kw}`
+      `${p.address} | lat ${p.lat.toFixed(6)}, lng ${p.lng.toFixed(6)} | ` +
+      `placeId: ${p.placeId} | types: ${types}${kw}`
     );
   });
 
   return lines.join("\n");
+}
+
+type FindPlaceFromTextResponse = {
+  status: string;
+  candidates?: NearbyApiResult[];
+  error_message?: string;
+};
+
+/**
+ * When the model returns stops from our verified list, replace lat/lng with the exact
+ * coordinates from Nearby Search (model copy/paste of numbers is often wrong).
+ */
+export function snapItineraryItemsToVerifiedCandidates(
+  items: ItineraryItem[],
+  candidates: GooglePlaceCandidate[]
+): Set<string> {
+  const pinned = new Set<string>();
+  if (!candidates.length) return pinned;
+
+  const byName = new Map<string, GooglePlaceCandidate>();
+  const byPlaceId = new Map<string, GooglePlaceCandidate>();
+  for (const c of candidates) {
+    const k = c.name.trim().toLowerCase();
+    if (!byName.has(k)) byName.set(k, c);
+    const pid = c.placeId.trim();
+    if (pid && !byPlaceId.has(pid)) byPlaceId.set(pid, c);
+  }
+
+  for (const it of items) {
+    const pid = it.placeId?.trim();
+    const k = it.name.trim().toLowerCase();
+    const hit = (pid ? byPlaceId.get(pid) : null) ?? byName.get(k);
+    if (hit) {
+      it.lat = hit.lat;
+      it.lng = hit.lng;
+      it.address = hit.address;
+      it.placeId = hit.placeId;
+      pinned.add(k);
+    }
+  }
+  return pinned;
+}
+
+export async function lookupPlaceDetails(
+  apiKey: string,
+  placeId: string
+): Promise<ResolvedPlaceFromText | null> {
+  const pid = placeId.trim();
+  if (!pid) return null;
+
+  const qs = new URLSearchParams({
+    place_id: pid,
+    fields: "geometry,formatted_address,place_id,name",
+    key: apiKey,
+  });
+  const url = `https://maps.googleapis.com/maps/api/place/details/json?${qs.toString()}`;
+
+  try {
+    const res = await fetch(url);
+    const data = (await res.json()) as PlaceDetailsResponse;
+    if (data.status !== "OK" || !data.result) return null;
+    const loc = data.result.geometry?.location;
+    if (!loc || typeof loc.lat !== "number" || typeof loc.lng !== "number") return null;
+    const formatted = data.result.formatted_address?.trim();
+    const resolvedPid = data.result.place_id?.trim() || pid;
+    return {
+      lat: loc.lat,
+      lng: loc.lng,
+      ...(formatted ? { address: formatted } : {}),
+      ...(resolvedPid ? { placeId: resolvedPid } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export type ResolvedPlaceFromText = {
+  lat: number;
+  lng: number;
+  address?: string;
+  placeId?: string;
+};
+
+/**
+ * Resolve a free-text place near a bias point (Places Find + Text Search fallback).
+ * Returns coordinates plus formatted address and place id when the API provides them.
+ */
+export async function findPlaceFromText(
+  apiKey: string,
+  query: string,
+  biasLat: number,
+  biasLng: number,
+  radiusMeters = GOOGLE_NEARBY_MAX_RADIUS_METERS
+): Promise<ResolvedPlaceFromText | null> {
+  const q = query.trim();
+  if (!q || !Number.isFinite(biasLat) || !Number.isFinite(biasLng)) return null;
+
+  const r = Math.min(Math.max(radiusMeters, 1000), GOOGLE_NEARBY_MAX_RADIUS_METERS);
+  const bias = `circle:${r}@${biasLat},${biasLng}`;
+
+  const findQs = new URLSearchParams({
+    input: q,
+    inputtype: "textquery",
+    fields: "geometry,formatted_address,place_id",
+    locationbias: bias,
+    key: apiKey,
+  });
+  const findUrl = `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?${findQs.toString()}`;
+
+  try {
+    const findRes = await fetch(findUrl);
+    const findData = (await findRes.json()) as FindPlaceFromTextResponse;
+    if (findData.status === "OK" && findData.candidates?.length) {
+      const c = findData.candidates[0];
+      const loc = c.geometry?.location;
+      if (loc && typeof loc.lat === "number" && typeof loc.lng === "number") {
+        const formatted = c.formatted_address?.trim();
+        const pid = c.place_id?.trim();
+        return {
+          lat: loc.lat,
+          lng: loc.lng,
+          ...(formatted ? { address: formatted } : {}),
+          ...(pid ? { placeId: pid } : {}),
+        };
+      }
+    }
+  } catch {
+    // fall through
+  }
+
+  const textQs = new URLSearchParams({
+    query: q,
+    location: `${biasLat},${biasLng}`,
+    radius: String(r),
+    key: apiKey,
+  });
+  const textUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?${textQs.toString()}`;
+
+  try {
+    const textRes = await fetch(textUrl);
+    const textData = (await textRes.json()) as NearbyApiResponse;
+    if (textData.status === "OK" && textData.results?.length) {
+      const row = textData.results[0];
+      const loc = row.geometry?.location;
+      if (loc && typeof loc.lat === "number" && typeof loc.lng === "number") {
+        const formatted = row.formatted_address?.trim();
+        const vicinity = row.vicinity?.trim();
+        const pid = row.place_id?.trim();
+        const address = formatted || vicinity;
+        return {
+          lat: loc.lat,
+          lng: loc.lng,
+          ...(address ? { address } : {}),
+          ...(pid ? { placeId: pid } : {}),
+        };
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }

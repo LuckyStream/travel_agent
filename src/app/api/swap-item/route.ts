@@ -87,14 +87,21 @@ Suggest **one** alternative that fits the trip and is noticeably different from 
         lat: merged.lat,
         lng: merged.lng,
         destinationHint: prefs.destination.trim(),
+        address: merged.address ?? null,
+        placeId: merged.placeId ?? null,
       },
     ];
-    await enrichItemCoordinates(forGeo);
+    const placesKey = process.env.GOOGLE_PLACES_API_KEY?.trim() ?? "";
+    await enrichItemCoordinates(forGeo, {
+      googlePlacesApiKey: placesKey || undefined,
+    });
 
     const result: ItineraryItem = {
       ...merged,
       lat: forGeo[0].lat,
       lng: forGeo[0].lng,
+      address: forGeo[0].address ?? merged.address ?? null,
+      placeId: forGeo[0].placeId ?? merged.placeId ?? null,
     };
 
     return NextResponse.json({ item: result });

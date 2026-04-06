@@ -1,9 +1,9 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ItineraryMap } from "@/components/ItineraryMap";
 import { SiteHeader } from "@/components/SiteHeader";
 import { loadTrip, updateTripItems } from "@/lib/session-trip";
 import { itineraryLegKey } from "@/lib/itinerary-legs";
@@ -20,11 +20,6 @@ type TravelLegInfo = {
   source: "google" | "estimate";
   nearby?: boolean;
 };
-
-const ItineraryMap = dynamic(
-  () => import("@/components/ItineraryMap").then((mod) => ({ default: mod.ItineraryMap })),
-  { ssr: false, loading: () => <div className="min-h-[320px] animate-pulse rounded-2xl bg-surface-muted" /> }
-);
 
 const SLOT_LABEL: Record<string, string> = {
   morning_destination: "Morning destination",
@@ -62,6 +57,45 @@ function RatingLine({ rating, reviewCount }: { rating?: number | null; reviewCou
         <span className="text-ink-muted">{formatReviewCount(Math.floor(reviewCount!))}</span>
       )}
     </p>
+  );
+}
+
+function googleMapsHref(item: ItineraryItem, destination: string): string {
+  const dest = destination.trim();
+  if (item.address?.trim()) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.address.trim())}`;
+  }
+  const hasCoords =
+    Number.isFinite(item.lat) &&
+    Number.isFinite(item.lng) &&
+    !(item.lat === 0 && item.lng === 0);
+  if (hasCoords) {
+    return `https://www.google.com/maps/search/?api=1&query=${item.lat},${item.lng}`;
+  }
+  const nameQ = encodeURIComponent(item.name.trim());
+  if (item.placeId?.trim()) {
+    return `https://www.google.com/maps/search/?api=1&query=${nameQ}&query_place_id=${encodeURIComponent(item.placeId.trim())}`;
+  }
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${item.name.trim()}, ${dest}`)}`;
+}
+
+function AddressLine({ item, destination }: { item: ItineraryItem; destination: string }) {
+  const href = googleMapsHref(item, destination);
+  return (
+    <div className="mt-2 text-sm">
+      {item.address?.trim() ? (
+        <p className="leading-snug text-ink-muted">{item.address.trim()}</p>
+      ) : null}
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="mt-1 inline-block text-accent underline decoration-accent/50 underline-offset-2 hover:no-underline"
+      >
+        Open in Google Maps
+      </a>
+    </div>
   );
 }
 
@@ -306,6 +340,7 @@ export default function ItineraryPage() {
                               {it.name}
                             </h3>
                             <RatingLine rating={it.rating} reviewCount={it.reviewCount} />
+                            <AddressLine item={it} destination={prefs.destination} />
                           </div>
                           <button
                             type="button"

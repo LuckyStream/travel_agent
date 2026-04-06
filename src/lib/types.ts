@@ -55,6 +55,10 @@ export type ItineraryItem = {
   description: string;
   lat: number;
   lng: number;
+  /** Street or vicinity line when known (Places / LLM). */
+  address?: string | null;
+  /** Google Place ID when resolved via Places — enables stable Maps links. */
+  placeId?: string | null;
   /** Google-style 1–5 rating when sourced from verified places / LLM. */
   rating?: number | null;
   reviewCount?: number | null;

@@ -1,4 +1,15 @@
+import { findPlaceFromText, googleGeocode, lookupPlaceDetails } from "./google-places";
+
 const USER_AGENT = "TravelRecommendationApp/1.0 (contact: local-dev)";
+
+export type EnrichCoordinatesOptions = {
+  googlePlacesApiKey?: string;
+  /**
+   * Lowercase trimmed place names already pinned to authoritative Google coords
+   * (e.g. from verified Nearby list) — skip Find Place so we do not override good data.
+   */
+  skipFindPlaceForNormalizedNames?: Set<string>;
+};
 
 export async function geocodePlace(query: string): Promise<{ lat: number; lng: number } | null> {
   const q = query.trim();
@@ -24,21 +35,85 @@ export async function geocodePlace(query: string): Promise<{ lat: number; lng: n
   }
 }
 
+export type EnrichCoordinateRow = {
+  name: string;
+  lat: number;
+  lng: number;
+  destinationHint: string;
+  address?: string | null;
+  placeId?: string | null;
+};
+
 export async function enrichItemCoordinates(
-  items: { name: string; lat: number; lng: number; destinationHint: string }[]
+  items: EnrichCoordinateRow[],
+  options?: EnrichCoordinatesOptions
 ): Promise<void> {
+  const key = options?.googlePlacesApiKey?.trim();
+  const skipFind = options?.skipFindPlaceForNormalizedNames;
+  let destCenter: { lat: number; lng: number } | null = null;
+
+  const ensureDestCenter = async (destinationHint: string) => {
+    if (!key) return null;
+    if (!destCenter) {
+      destCenter = await googleGeocode(destinationHint.trim(), key);
+    }
+    return destCenter;
+  };
+
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
-    const needsFix = it.lat === 0 && it.lng === 0;
-    if (!needsFix) continue;
-    const query = `${it.name}, ${it.destinationHint}`;
-    const coords = await geocodePlace(query);
-    if (coords) {
-      it.lat = coords.lat;
-      it.lng = coords.lng;
+    const dest = it.destinationHint.trim();
+    const nameNorm = it.name.trim().toLowerCase();
+
+    if (key && !skipFind?.has(nameNorm)) {
+      const pid = it.placeId?.trim();
+      if (pid) {
+        const exact = await lookupPlaceDetails(key, pid);
+        if (exact) {
+          it.lat = exact.lat;
+          it.lng = exact.lng;
+          if (exact.address) it.address = exact.address;
+          if (exact.placeId) it.placeId = exact.placeId;
+          if (i < items.length - 1) {
+            await new Promise((r) => setTimeout(r, 120));
+          }
+          continue;
+        }
+      }
+
+      let biasLat = it.lat;
+      let biasLng = it.lng;
+      if (!Number.isFinite(biasLat) || !Number.isFinite(biasLng) || (biasLat === 0 && biasLng === 0)) {
+        const c = await ensureDestCenter(dest);
+        if (c) {
+          biasLat = c.lat;
+          biasLng = c.lng;
+        }
+      }
+      if (Number.isFinite(biasLat) && Number.isFinite(biasLng)) {
+        const found = await findPlaceFromText(key, `${it.name.trim()} ${dest}`, biasLat, biasLng);
+        if (found) {
+          it.lat = found.lat;
+          it.lng = found.lng;
+          if (found.address) it.address = found.address;
+          if (found.placeId) it.placeId = found.placeId;
+        }
+      }
+      if (i < items.length - 1) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      continue;
     }
-    if (i < items.length - 1) {
-      await new Promise((r) => setTimeout(r, 1100));
+
+    if (it.lat === 0 && it.lng === 0) {
+      const coords = await geocodePlace(`${it.name.trim()}, ${dest}`);
+      if (coords) {
+        it.lat = coords.lat;
+        it.lng = coords.lng;
+      }
+      if (i < items.length - 1) {
+        await new Promise((r) => setTimeout(r, 1100));
+      }
     }
   }
 }

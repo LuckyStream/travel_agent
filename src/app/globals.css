@@ -5,6 +5,8 @@
 :root {
   --background: #0a0e12;
   --foreground: #e8eef5;
+  --font-geist-sans: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Trebuchet MS", "Avenir Next", "Segoe UI", system-ui, sans-serif;
 }
 
 body {

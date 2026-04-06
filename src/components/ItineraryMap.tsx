@@ -1,10 +1,6 @@
 "use client";
 
-import "mapbox-gl/dist/mapbox-gl.css";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Map as MapboxMap } from "mapbox-gl";
-import Map, { Marker, NavigationControl } from "react-map-gl/mapbox";
-import type { MapRef } from "react-map-gl/mapbox";
 import type { ItineraryItem } from "@/lib/types";
 
 const SLOT_COLORS: Record<string, string> = {
@@ -18,22 +14,99 @@ const SLOT_COLORS: Record<string, string> = {
   evening: "#fb7185",
 };
 
+const MAPBOX_VERSION = "3.21.0";
+const MAPBOX_SCRIPT_ID = "mapbox-gl-js-script";
+const MAPBOX_STYLE_ID = "mapbox-gl-js-style";
+const FLY_ZOOM = 15;
+const FLY_DURATION_MS = 1500;
+
 type Props = {
   items: ItineraryItem[];
-  /** Item selected via card or pin — map flies here at zoom 15. */
   focusedId?: string | null;
   onSelectPin?: (id: string | null) => void;
 };
 
-const FLY_ZOOM = 15;
-const FLY_DURATION_MS = 1500;
+type MapboxMarker = {
+  remove: () => void;
+  setLngLat: (lngLat: [number, number]) => MapboxMarker;
+  addTo: (map: MapboxMap) => MapboxMarker;
+  getElement: () => HTMLElement;
+};
 
-function flyMapToItem(map: MapboxMap, lng: number, lat: number): void {
-  map.flyTo({
-    center: [lng, lat],
-    zoom: FLY_ZOOM,
-    duration: FLY_DURATION_MS,
-    essential: true,
+type MapboxMap = {
+  addControl: (control: unknown, position?: string) => void;
+  remove: () => void;
+  flyTo: (options: {
+    center: [number, number];
+    zoom: number;
+    duration: number;
+    essential: boolean;
+  }) => void;
+  isStyleLoaded: () => boolean;
+  once: (event: "load", listener: () => void) => void;
+};
+
+type MapboxCtor = {
+  accessToken: string;
+  Map: new (options: {
+    container: HTMLElement;
+    style: string;
+    center: [number, number];
+    zoom: number;
+    bearing: number;
+    pitch: number;
+  }) => MapboxMap;
+  Marker: new (options: { element: HTMLElement; anchor: "bottom" }) => MapboxMarker;
+  NavigationControl: new () => unknown;
+};
+
+declare global {
+  interface Window {
+    mapboxgl?: MapboxCtor;
+  }
+}
+
+function ensureStyle(href: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const existing = document.getElementById(MAPBOX_STYLE_ID) as HTMLLinkElement | null;
+    if (existing) {
+      resolve();
+      return;
+    }
+
+    const link = document.createElement("link");
+    link.id = MAPBOX_STYLE_ID;
+    link.rel = "stylesheet";
+    link.href = href;
+    link.onload = () => resolve();
+    link.onerror = () => reject(new Error("Could not load Mapbox styles"));
+    document.head.appendChild(link);
+  });
+}
+
+function ensureScript(src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (window.mapboxgl) {
+      resolve();
+      return;
+    }
+
+    const existing = document.getElementById(MAPBOX_SCRIPT_ID) as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Could not load Mapbox script")), {
+        once: true,
+      });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = MAPBOX_SCRIPT_ID;
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Could not load Mapbox script"));
+    document.head.appendChild(script);
   });
 }
 
@@ -65,38 +138,143 @@ function initialView(items: ItineraryItem[]) {
 export function ItineraryMap({ items, focusedId, onSelectPin }: Props) {
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   const view = useMemo(() => initialView(items), [items]);
-  const mapRef = useRef<MapRef | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<MapboxMap | null>(null);
+  const markersRef = useRef<Map<string, MapboxMarker>>(new Map());
   const [mapReady, setMapReady] = useState(false);
-
-  const flySignature = useMemo(() => {
-    if (!focusedId) return "";
-    const it = items.find((i) => i.id === focusedId);
-    if (!it) return "";
-    if (!Number.isFinite(it.lat) || !Number.isFinite(it.lng) || (it.lat === 0 && it.lng === 0)) {
-      return "";
-    }
-    return `${focusedId}:${it.lng.toFixed(6)},${it.lat.toFixed(6)}`;
-  }, [focusedId, items]);
+  const [mapError, setMapError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!mapReady || !flySignature || !focusedId) return;
+    if (!token || !containerRef.current || mapRef.current) return;
+
+    let active = true;
+
+    void (async () => {
+      try {
+        await ensureStyle(`https://api.mapbox.com/mapbox-gl-js/v${MAPBOX_VERSION}/mapbox-gl.css`);
+        await ensureScript(`https://api.mapbox.com/mapbox-gl-js/v${MAPBOX_VERSION}/mapbox-gl.js`);
+        if (!active || !containerRef.current || !window.mapboxgl) return;
+
+        window.mapboxgl.accessToken = token;
+        const map = new window.mapboxgl.Map({
+          container: containerRef.current,
+          style: "mapbox://styles/mapbox/dark-v11",
+          center: [view.longitude, view.latitude],
+          zoom: view.zoom,
+          bearing: 0,
+          pitch: 0,
+        });
+
+        map.addControl(new window.mapboxgl.NavigationControl(), "top-right");
+        const markReady = () => {
+          if (active) setMapReady(true);
+        };
+        if (map.isStyleLoaded()) {
+          markReady();
+        } else {
+          map.once("load", markReady);
+        }
+
+        mapRef.current = map;
+      } catch (error) {
+        if (!active) return;
+        setMapError(error instanceof Error ? error.message : "Could not load map");
+      }
+    })();
+
+    return () => {
+      active = false;
+      for (const marker of markersRef.current.values()) {
+        marker.remove();
+      }
+      markersRef.current.clear();
+      mapRef.current?.remove();
+      mapRef.current = null;
+      setMapReady(false);
+    };
+  }, [token, view.latitude, view.longitude, view.zoom]);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !window.mapboxgl) return;
+
+    const nextIds = new Set<string>();
+
+    for (const it of items) {
+      if (!Number.isFinite(it.lat) || !Number.isFinite(it.lng) || (it.lat === 0 && it.lng === 0)) {
+        continue;
+      }
+
+      nextIds.add(it.id);
+      const color = SLOT_COLORS[it.timeSlot] ?? "#94a3b8";
+      const active = focusedId === it.id;
+      const existing = markersRef.current.get(it.id);
+
+      if (existing) {
+        existing.setLngLat([it.lng, it.lat]);
+        const el = existing.getElement();
+        el.style.backgroundColor = color;
+        el.style.boxShadow = active ? "0 0 0 3px rgba(56,189,248,0.6)" : "";
+        el.style.transform = active ? "scale(1.15)" : "scale(1)";
+        continue;
+      }
+
+      const el = document.createElement("button");
+      el.type = "button";
+      el.title = it.name;
+      el.setAttribute("aria-label", it.name);
+      el.style.width = "16px";
+      el.style.height = "16px";
+      el.style.borderRadius = "9999px";
+      el.style.border = "2px solid white";
+      el.style.boxShadow = active ? "0 0 0 3px rgba(56,189,248,0.6)" : "";
+      el.style.backgroundColor = color;
+      el.style.cursor = "pointer";
+      el.style.transform = active ? "scale(1.15)" : "scale(1)";
+      el.addEventListener("click", (event) => {
+        event.stopPropagation();
+        onSelectPin?.(it.id);
+      });
+
+      const marker = new window.mapboxgl.Marker({ element: el, anchor: "bottom" })
+        .setLngLat([it.lng, it.lat])
+        .addTo(mapRef.current);
+
+      markersRef.current.set(it.id, marker);
+    }
+
+    for (const [id, marker] of markersRef.current.entries()) {
+      if (nextIds.has(id)) continue;
+      marker.remove();
+      markersRef.current.delete(id);
+    }
+  }, [focusedId, items, mapReady, onSelectPin]);
+
+  useEffect(() => {
+    if (!mapReady || !focusedId) return;
     const item = items.find((i) => i.id === focusedId);
     if (!item) return;
+    if (!Number.isFinite(item.lat) || !Number.isFinite(item.lng) || (item.lat === 0 && item.lng === 0)) {
+      return;
+    }
 
-    const run = (map: MapboxMap) => {
-      flyMapToItem(map, item.lng, item.lat);
-    };
-
-    const map = mapRef.current?.getMap();
+    const map = mapRef.current;
     if (!map) return;
 
-    const exec = () => run(map);
+    const exec = () => {
+      map.flyTo({
+        center: [item.lng, item.lat],
+        zoom: FLY_ZOOM,
+        duration: FLY_DURATION_MS,
+        essential: true,
+      });
+    };
+
     if (map.isStyleLoaded()) {
       exec();
     } else {
       map.once("load", exec);
     }
-  }, [mapReady, flySignature, focusedId, items]);
+  }, [focusedId, items, mapReady]);
 
   if (!token) {
     return (
@@ -120,49 +298,19 @@ export function ItineraryMap({ items, focusedId, onSelectPin }: Props) {
     );
   }
 
+  if (mapError) {
+    return (
+      <div className="flex h-full min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-coral/40 bg-surface p-6 text-center">
+        <p className="font-display text-base font-semibold text-ink">Map unavailable</p>
+        <p className="mt-2 max-w-sm text-sm text-ink-muted">{mapError}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="relative h-full min-h-[320px] overflow-hidden rounded-2xl border border-surface-muted">
-      <Map
-        ref={mapRef}
-        mapboxAccessToken={token}
-        initialViewState={{
-          ...view,
-          bearing: 0,
-          pitch: 0,
-        }}
-        onLoad={() => setMapReady(true)}
-        style={{ width: "100%", height: "100%", minHeight: 320 }}
-        mapStyle="mapbox://styles/mapbox/dark-v11"
-        reuseMaps
-      >
-        <NavigationControl position="top-right" />
-        {items.map((it) => {
-          if (!Number.isFinite(it.lat) || !Number.isFinite(it.lng) || (it.lat === 0 && it.lng === 0)) {
-            return null;
-          }
-          const color = SLOT_COLORS[it.timeSlot] ?? "#94a3b8";
-          const active = focusedId === it.id;
-          return (
-            <Marker key={it.id} longitude={it.lng} latitude={it.lat} anchor="bottom">
-              <button
-                type="button"
-                title={it.name}
-                className="h-4 w-4 -translate-y-0.5 rounded-full border-2 border-white shadow-md"
-                style={{
-                  backgroundColor: color,
-                  boxShadow: active ? `0 0 0 3px rgba(56,189,248,0.6)` : undefined,
-                  transform: active ? "scale(1.15)" : undefined,
-                }}
-                aria-label={it.name}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectPin?.(it.id);
-                }}
-              />
-            </Marker>
-          );
-        })}
-      </Map>
+      {!mapReady && <div className="absolute inset-0 animate-pulse bg-surface-muted" />}
+      <div ref={containerRef} className="h-full min-h-[320px] w-full" />
     </div>
   );
 }

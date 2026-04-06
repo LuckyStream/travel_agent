@@ -5,6 +5,8 @@ import {
   formatVerifiedPlacesForPrompt,
   GOOGLE_NEARBY_MAX_RADIUS_METERS,
   interestsPreferRegionalSearch,
+  snapItineraryItemsToVerifiedCandidates,
+  type GooglePlaceCandidate,
 } from "@/lib/google-places";
 import { normalizeItinerary } from "@/lib/itinerary-schema";
 import { parseJsonLoose } from "@/lib/json-utils";
@@ -34,6 +36,8 @@ Each day object must have:
 Each slot object MUST have:
   - "name": string — must match a **verified place** from the user message when you use that venue (exact name).
   - "description": string — **include the Google rating and review count** in the prose (e.g. "4.6★, 1,240 reviews") plus a short useful line (cuisine, vibe, or what to see).
+  - "address": string (copy from the verified list)
+  - "placeId": string (copy exactly from the verified list)
   - "lat": number (WGS84)
   - "lng": number (WGS84)
   - "rating": number (1–5, from the verified list for that place)
@@ -68,7 +72,7 @@ Dining preferences: ${prefs.dining.join(", ") || "any"}
 Priority order (highest first): ${prefs.priorityOrder.join(" > ")}
 ${wikiBlock}
 ${regionalBlock}
-### Verified places (Google Places — select and arrange ONLY from this list; copy exact names, lat, lng, rating, and reviewCount)
+### Verified places (Google Places — select and arrange ONLY from this list; copy exact name, address, placeId, lat, lng, rating, and reviewCount)
 ${verifiedPlacesText}
 
 Respect budget and priorities. Build ${daysWord} with geographically clustered stops per day.`;
@@ -107,16 +111,18 @@ export async function POST(req: Request) {
     const placesKey = process.env.GOOGLE_PLACES_API_KEY?.trim() ?? "";
 
     let verifiedPlacesText: string;
+    let verifiedCandidates: GooglePlaceCandidate[] = [];
     if (placesKey) {
       try {
-        const candidates = await fetchVerifiedPlacesForDestination(
+        verifiedCandidates = await fetchVerifiedPlacesForDestination(
           dest,
           prefs.interests,
           prefs.dining,
           placesKey
         );
-        verifiedPlacesText = formatVerifiedPlacesForPrompt(candidates);
+        verifiedPlacesText = formatVerifiedPlacesForPrompt(verifiedCandidates);
       } catch (e) {
+        verifiedCandidates = [];
         verifiedPlacesText = `(Google Places request failed: ${e instanceof Error ? e.message : "unknown error"}. Use conservative, well-known real venues only and plausible coordinates near ${dest}.)`;
       }
     } else {
@@ -164,17 +170,29 @@ export async function POST(req: Request) {
       );
     }
 
+    const pinnedNames =
+      verifiedCandidates.length > 0
+        ? snapItineraryItemsToVerifiedCandidates(items, verifiedCandidates)
+        : new Set<string>();
+
     const forGeo = items.map((it) => ({
       name: it.name,
       lat: it.lat,
       lng: it.lng,
       destinationHint: dest,
+      address: it.address ?? null,
+      placeId: it.placeId ?? null,
     }));
-    await enrichItemCoordinates(forGeo);
+    await enrichItemCoordinates(forGeo, {
+      googlePlacesApiKey: placesKey || undefined,
+      skipFindPlaceForNormalizedNames: pinnedNames,
+    });
     items = items.map((it, i) => ({
       ...it,
       lat: forGeo[i].lat,
       lng: forGeo[i].lng,
+      address: forGeo[i].address ?? it.address ?? null,
+      placeId: forGeo[i].placeId ?? it.placeId ?? null,
     }));
 
     return NextResponse.json({ items, preferences: prefsWithDays });

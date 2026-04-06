@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildItineraryLegs, itineraryLegKey } from "@/lib/itinerary-legs";
 import {
-  estimateDriveDurationSeconds,
+  estimateDriveDurationFromStraightLineMeters,
   formatDistanceKm,
   formatDuration,
   haversineMeters,
@@ -114,7 +114,7 @@ export async function POST(req: Request) {
             }
           }
 
-          const durationSeconds = estimateDriveDurationSeconds(straightM * 1.35);
+          const durationSeconds = estimateDriveDurationFromStraightLineMeters(straightM);
           return {
             key,
             fromId: from.id,
