@@ -1,0 +1,220 @@
+<svg width="1600" height="1100" viewBox="0 0 1600 1100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .title { font: 700 18px 'DM Sans', Arial, sans-serif; fill: #3b332b; }
+      .label { font: 600 14px 'DM Sans', Arial, sans-serif; fill: #4b433b; }
+      .small { font: 500 12px 'DM Sans', Arial, sans-serif; fill: #5d554b; }
+      .tiny { font: 500 11px 'DM Sans', Arial, sans-serif; fill: #6f665d; }
+      .boxText { font: 600 13px 'DM Sans', Arial, sans-serif; fill: #3f372f; }
+      .legendText { font: 600 13px 'DM Sans', Arial, sans-serif; fill: #4f463d; }
+      .groupTitle { font: 700 16px 'DM Sans', Arial, sans-serif; fill: #6d3b3b; }
+      .arrow { stroke: #5f5a53; stroke-width: 2.2; fill: none; }
+      .group { fill: #f4d9d7; stroke: #d9a7a2; stroke-width: 2; }
+      .code { fill: #dbe8ff; stroke: #9bb9ea; stroke-width: 2; }
+      .db { fill: #ddead4; stroke: #a8c59b; stroke-width: 2; }
+      .llm { fill: #fdf0bd; stroke: #e8ca72; stroke-width: 2; }
+      .vec { fill: #e6dbef; stroke: #bea5d7; stroke-width: 2; }
+      .io { fill: #ffffff; stroke: #b9b0a5; stroke-width: 2; }
+      .note { fill: #fff; stroke: #cdbfae; stroke-width: 1.6; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#5f5a53"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="1100" fill="#fffdf9"/>
+
+  <text x="800" y="48" text-anchor="middle" class="title">Personal Traveling Agent - System Architecture</text>
+
+  <!-- Legend -->
+  <g transform="translate(50,90)">
+    <ellipse cx="26" cy="18" rx="26" ry="18" class="io"/>
+    <text x="70" y="22" class="legendText">Input / Output</text>
+
+    <rect x="0" y="52" width="52" height="34" rx="17" class="code"/>
+    <text x="70" y="74" class="legendText">Code / Frontend / API</text>
+
+    <rect x="0" y="98" width="52" height="34" rx="17" class="db"/>
+    <text x="70" y="120" class="legendText">Data / Session / External Service</text>
+
+    <rect x="0" y="144" width="52" height="34" rx="17" class="vec"/>
+    <text x="70" y="166" class="legendText">Planning / Logic Layer</text>
+
+    <rect x="0" y="190" width="52" height="34" rx="17" class="llm"/>
+    <text x="70" y="212" class="legendText">LLM Involvement</text>
+  </g>
+
+  <!-- User and entry -->
+  <g transform="translate(620,95)">
+    <circle cx="20" cy="20" r="10" stroke="#5f5a53" stroke-width="2" fill="none"/>
+    <line x1="20" y1="30" x2="20" y2="62" stroke="#5f5a53" stroke-width="2"/>
+    <line x1="4" y1="46" x2="36" y2="46" stroke="#5f5a53" stroke-width="2"/>
+    <line x1="20" y1="62" x2="5" y2="86" stroke="#5f5a53" stroke-width="2"/>
+    <line x1="20" y1="62" x2="35" y2="86" stroke="#5f5a53" stroke-width="2"/>
+    <text x="20" y="106" text-anchor="middle" class="label">User</text>
+  </g>
+
+  <rect x="585" y="230" width="110" height="66" rx="22" class="code"/>
+  <text x="640" y="257" text-anchor="middle" class="boxText">Home /</text>
+  <text x="640" y="276" text-anchor="middle" class="boxText">Header UI</text>
+
+  <line x1="640" y1="201" x2="640" y2="230" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <!-- Pipeline selectors -->
+  <rect x="820" y="210" width="150" height="54" rx="16" class="code"/>
+  <text x="895" y="232" text-anchor="middle" class="small">Planner Wizard</text>
+  <text x="895" y="249" text-anchor="middle" class="small">Pipeline</text>
+
+  <rect x="820" y="280" width="150" height="54" rx="16" class="llm"/>
+  <text x="895" y="302" text-anchor="middle" class="small">AI Suggestion</text>
+  <text x="895" y="319" text-anchor="middle" class="small">Chat Pipeline</text>
+
+  <rect x="820" y="350" width="150" height="54" rx="16" class="code"/>
+  <text x="895" y="372" text-anchor="middle" class="small">Itinerary Review</text>
+  <text x="895" y="389" text-anchor="middle" class="small">Pipeline</text>
+
+  <line x1="695" y1="250" x2="820" y2="237" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="695" y1="263" x2="820" y2="307" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="695" y1="276" x2="820" y2="377" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <!-- Chat pipeline group -->
+  <rect x="265" y="470" width="290" height="470" rx="26" class="group"/>
+  <text x="410" y="500" text-anchor="middle" class="groupTitle">AI Suggestion Chat Flow</text>
+
+  <circle cx="410" cy="545" r="9" stroke="#5f5a53" stroke-width="2" fill="none"/>
+  <line x1="410" y1="554" x2="410" y2="580" stroke="#5f5a53" stroke-width="2"/>
+  <line x1="396" y1="566" x2="424" y2="566" stroke="#5f5a53" stroke-width="2"/>
+  <line x1="410" y1="580" x2="397" y2="602" stroke="#5f5a53" stroke-width="2"/>
+  <line x1="410" y1="580" x2="423" y2="602" stroke="#5f5a53" stroke-width="2"/>
+  <text x="410" y="620" text-anchor="middle" class="tiny">User</text>
+
+  <rect x="350" y="640" width="120" height="64" rx="22" class="code"/>
+  <text x="410" y="666" text-anchor="middle" class="boxText">Destination</text>
+  <text x="410" y="685" text-anchor="middle" class="boxText">Chat UI</text>
+
+  <rect x="350" y="740" width="120" height="64" rx="22" class="code"/>
+  <text x="410" y="766" text-anchor="middle" class="boxText">/api/chat</text>
+  <text x="410" y="785" text-anchor="middle" class="boxText">Route</text>
+
+  <rect x="350" y="840" width="120" height="64" rx="22" class="llm"/>
+  <text x="410" y="866" text-anchor="middle" class="boxText">Ollama</text>
+  <text x="410" y="885" text-anchor="middle" class="boxText">Reasoning</text>
+
+  <polygon points="410,930 485,1005 410,1080 335,1005" class="db"/>
+  <text x="410" y="1001" text-anchor="middle" class="small">Confirmed</text>
+  <text x="410" y="1018" text-anchor="middle" class="small">Destination</text>
+
+  <line x1="410" y1="620" x2="410" y2="640" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="410" y1="704" x2="410" y2="740" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="410" y1="804" x2="410" y2="840" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="410" y1="904" x2="410" y2="930" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <polygon points="225,700 305,700 327,680 247,680" class="note"/>
+  <text x="276" y="695" text-anchor="middle" class="tiny">Trip intent</text>
+  <line x1="327" y1="690" x2="350" y2="672" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <!-- Planner pipeline group -->
+  <rect x="655" y="470" width="290" height="470" rx="26" class="group"/>
+  <text x="800" y="500" text-anchor="middle" class="groupTitle">Light Planner Flow</text>
+
+  <circle cx="800" cy="545" r="9" stroke="#5f5a53" stroke-width="2" fill="none"/>
+  <line x1="800" y1="554" x2="800" y2="580" stroke="#5f5a53" stroke-width="2"/>
+  <line x1="786" y1="566" x2="814" y2="566" stroke="#5f5a53" stroke-width="2"/>
+  <line x1="800" y1="580" x2="787" y2="602" stroke="#5f5a53" stroke-width="2"/>
+  <line x1="800" y1="580" x2="813" y2="602" stroke="#5f5a53" stroke-width="2"/>
+  <text x="800" y="620" text-anchor="middle" class="tiny">User</text>
+
+  <rect x="740" y="640" width="120" height="64" rx="22" class="code"/>
+  <text x="800" y="666" text-anchor="middle" class="boxText">TravelPlanner</text>
+  <text x="800" y="685" text-anchor="middle" class="boxText">Wizard UI</text>
+
+  <rect x="740" y="740" width="120" height="64" rx="22" class="vec"/>
+  <text x="800" y="766" text-anchor="middle" class="boxText">Trip Prefs</text>
+  <text x="800" y="785" text-anchor="middle" class="boxText">Builder</text>
+
+  <rect x="740" y="840" width="120" height="64" rx="22" class="code"/>
+  <text x="800" y="866" text-anchor="middle" class="boxText">/api/generate</text>
+  <text x="800" y="885" text-anchor="middle" class="boxText">-plan</text>
+
+  <polygon points="800,930 875,1005 800,1080 725,1005" class="db"/>
+  <text x="800" y="1001" text-anchor="middle" class="small">Generated</text>
+  <text x="800" y="1018" text-anchor="middle" class="small">Trip Draft</text>
+
+  <line x1="800" y1="620" x2="800" y2="640" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="800" y1="704" x2="800" y2="740" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="800" y1="804" x2="800" y2="840" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="800" y1="904" x2="800" y2="930" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <polygon points="560,725 660,725 682,705 582,705" class="note"/>
+  <text x="621" y="719" text-anchor="middle" class="tiny">Destination + preferences</text>
+  <line x1="682" y1="715" x2="740" y2="672" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <!-- Review pipeline group -->
+  <rect x="1045" y="470" width="320" height="470" rx="26" class="group"/>
+  <text x="1205" y="500" text-anchor="middle" class="groupTitle">Itinerary Review & Mapping</text>
+
+  <circle cx="1205" cy="545" r="9" stroke="#5f5a53" stroke-width="2" fill="none"/>
+  <line x1="1205" y1="554" x2="1205" y2="580" stroke="#5f5a53" stroke-width="2"/>
+  <line x1="1191" y1="566" x2="1219" y2="566" stroke="#5f5a53" stroke-width="2"/>
+  <line x1="1205" y1="580" x2="1192" y2="602" stroke="#5f5a53" stroke-width="2"/>
+  <line x1="1205" y1="580" x2="1218" y2="602" stroke="#5f5a53" stroke-width="2"/>
+  <text x="1205" y="620" text-anchor="middle" class="tiny">User</text>
+
+  <rect x="1145" y="640" width="120" height="64" rx="22" class="db"/>
+  <text x="1205" y="666" text-anchor="middle" class="boxText">Session Trip</text>
+  <text x="1205" y="685" text-anchor="middle" class="boxText">Storage</text>
+
+  <rect x="1145" y="740" width="120" height="64" rx="22" class="code"/>
+  <text x="1205" y="766" text-anchor="middle" class="boxText">Itinerary Page</text>
+  <text x="1205" y="785" text-anchor="middle" class="boxText">+ Map UI</text>
+
+  <rect x="1080" y="840" width="120" height="64" rx="22" class="vec"/>
+  <text x="1140" y="866" text-anchor="middle" class="boxText">Google Places</text>
+  <text x="1140" y="885" text-anchor="middle" class="boxText">/ Geocode</text>
+
+  <rect x="1210" y="840" width="120" height="64" rx="22" class="code"/>
+  <text x="1270" y="866" text-anchor="middle" class="boxText">Travel Times</text>
+  <text x="1270" y="885" text-anchor="middle" class="boxText">/ Swap APIs</text>
+
+  <polygon points="1205,930 1280,1005 1205,1080 1130,1005" class="db"/>
+  <text x="1205" y="1001" text-anchor="middle" class="small">Mapped &</text>
+  <text x="1205" y="1018" text-anchor="middle" class="small">Refined Itinerary</text>
+
+  <line x1="1205" y1="620" x2="1205" y2="640" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="1205" y1="704" x2="1205" y2="740" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="1205" y1="804" x2="1140" y2="840" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="1205" y1="804" x2="1270" y2="840" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="1140" y1="904" x2="1188" y2="960" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="1270" y1="904" x2="1222" y2="960" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <polygon points="910,725 1080,725 1102,705 932,705" class="note"/>
+  <text x="1006" y="719" text-anchor="middle" class="tiny">Generated items, place IDs, coords</text>
+  <line x1="1102" y1="715" x2="1145" y2="672" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <!-- External systems on right -->
+  <rect x="1405" y="200" width="140" height="74" rx="22" class="llm"/>
+  <text x="1475" y="228" text-anchor="middle" class="boxText">Local Ollama</text>
+  <text x="1475" y="247" text-anchor="middle" class="boxText">Server</text>
+
+  <rect x="1405" y="315" width="140" height="74" rx="22" class="db"/>
+  <text x="1475" y="343" text-anchor="middle" class="boxText">Google APIs</text>
+  <text x="1475" y="362" text-anchor="middle" class="boxText">Places / Maps</text>
+
+  <rect x="1405" y="430" width="140" height="74" rx="22" class="code"/>
+  <text x="1475" y="458" text-anchor="middle" class="boxText">Browser</text>
+  <text x="1475" y="477" text-anchor="middle" class="boxText">Storage</text>
+
+  <line x1="470" y1="872" x2="1405" y2="237" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="860" y1="872" x2="1405" y2="352" class="arrow" marker-end="url(#arrowhead)"/>
+  <line x1="1265" y1="672" x2="1405" y2="467" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <!-- Notes -->
+  <polygon points="1010,302 1110,302 1132,282 1032,282" class="note"/>
+  <text x="1071" y="296" text-anchor="middle" class="tiny">User asks AI for destination ideas</text>
+
+  <polygon points="1010,372 1125,372 1147,352 1032,352" class="note"/>
+  <text x="1088" y="366" text-anchor="middle" class="tiny">User reviews route, swaps stops, opens maps</text>
+
+  <polygon points="1010,232 1115,232 1137,212 1032,212" class="note"/>
+  <text x="1074" y="226" text-anchor="middle" class="tiny">User already knows destination</text>
+</svg>

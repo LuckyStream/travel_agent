@@ -1,0 +1,149 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 33% 96%;
+    --foreground: 30 10% 15%;
+
+    --card: 40 30% 98%;
+    --card-foreground: 30 10% 15%;
+
+    --popover: 40 30% 98%;
+    --popover-foreground: 30 10% 15%;
+
+    --primary: 55 30% 42%;
+    --primary-foreground: 40 33% 96%;
+
+    --secondary: 40 20% 80%;
+    --secondary-foreground: 30 10% 15%;
+
+    --muted: 40 25% 91%;
+    --muted-foreground: 30 8% 45%;
+
+    --accent: 40 30% 88%;
+    --accent-foreground: 30 10% 20%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 40 20% 85%;
+    --input: 40 20% 85%;
+    --ring: 55 30% 42%;
+
+    --radius: 0.5rem;
+
+    --earth-dark: 30 15% 22%;
+    --earth-olive: 55 30% 42%;
+    --earth-sand: 40 33% 96%;
+    --earth-cream: 40 35% 92%;
+    --earth-warm: 30 40% 60%;
+
+    --sidebar-background: 40 30% 97%;
+    --sidebar-foreground: 30 10% 25%;
+    --sidebar-primary: 55 30% 42%;
+    --sidebar-primary-foreground: 40 33% 96%;
+    --sidebar-accent: 40 30% 88%;
+    --sidebar-accent-foreground: 30 10% 20%;
+    --sidebar-border: 40 20% 85%;
+    --sidebar-ring: 55 30% 42%;
+  }
+
+  .dark {
+    --background: 30 15% 8%;
+    --foreground: 40 20% 90%;
+
+    --card: 30 15% 12%;
+    --card-foreground: 40 20% 90%;
+
+    --popover: 30 15% 12%;
+    --popover-foreground: 40 20% 90%;
+
+    --primary: 55 35% 50%;
+    --primary-foreground: 30 15% 8%;
+
+    --secondary: 40 15% 25%;
+    --secondary-foreground: 40 20% 90%;
+
+    --muted: 30 12% 18%;
+    --muted-foreground: 40 10% 55%;
+
+    --accent: 40 15% 20%;
+    --accent-foreground: 55 35% 60%;
+
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 0 0% 95%;
+
+    --border: 30 12% 22%;
+    --input: 30 12% 22%;
+    --ring: 55 35% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Cormorant Garamond', serif;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Cormorant Garamond', serif;
+  }
+
+  .bg-earth-dark {
+    background-color: hsl(var(--earth-dark));
+  }
+
+  .bg-earth-cream {
+    background-color: hsl(var(--earth-cream));
+  }
+
+  .text-earth-olive {
+    color: hsl(var(--earth-olive));
+  }
+
+  .text-earth-warm {
+    color: hsl(var(--earth-warm));
+  }
+
+  .bg-earth-olive {
+    background-color: hsl(var(--earth-olive));
+  }
+
+  .border-earth-olive {
+    border-color: hsl(var(--earth-olive));
+  }
+
+  /* Stamp badge */
+  .stamp-badge {
+    width: 120px;
+    height: 120px;
+    border: 3px solid hsl(var(--earth-olive));
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    transform: rotate(-15deg);
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 700;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    line-height: 1.2;
+    color: hsl(var(--earth-olive));
+    padding: 0.5rem;
+  }
+}

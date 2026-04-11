@@ -27,14 +27,19 @@ function coordsUsable(lat: number, lng: number): boolean {
 
 async function googleMatrixLeg(
   apiKey: string,
-  fromLat: number,
-  fromLng: number,
-  toLat: number,
-  toLng: number
+  from: ItineraryItem,
+  to: ItineraryItem
 ): Promise<{ durationSec: number; distanceM: number } | null> {
+  const origin =
+    from.address?.trim() ||
+    (coordsUsable(from.lat, from.lng) ? `${from.lat},${from.lng}` : "");
+  const destination =
+    to.address?.trim() || (coordsUsable(to.lat, to.lng) ? `${to.lat},${to.lng}` : "");
+  if (!origin || !destination) return null;
+
   const params = new URLSearchParams({
-    origins: `${fromLat},${fromLng}`,
-    destinations: `${toLat},${toLng}`,
+    origins: origin,
+    destinations: destination,
     mode: "driving",
     units: "metric",
     key: apiKey,
@@ -99,7 +104,7 @@ export async function POST(req: Request) {
           }
 
           if (apiKey) {
-            const g = await googleMatrixLeg(apiKey, from.lat, from.lng, to.lat, to.lng);
+            const g = await googleMatrixLeg(apiKey, from, to);
             if (g) {
               return {
                 key,

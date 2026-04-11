@@ -14,11 +14,10 @@ const SLOT_COLORS: Record<string, string> = {
   evening: "#fb7185",
 };
 
-const MAPBOX_VERSION = "3.21.0";
-const MAPBOX_SCRIPT_ID = "mapbox-gl-js-script";
-const MAPBOX_STYLE_ID = "mapbox-gl-js-style";
-const FLY_ZOOM = 15;
-const FLY_DURATION_MS = 1500;
+const GOOGLE_MAPS_SCRIPT_ID = "google-maps-js-script";
+const DEFAULT_CENTER = { lat: 20, lng: 0 };
+const DEFAULT_ZOOM = 2;
+const FOCUS_ZOOM = 15;
 
 type Props = {
   items: ItineraryItem[];
@@ -26,156 +25,127 @@ type Props = {
   onSelectPin?: (id: string | null) => void;
 };
 
-type MapboxMarker = {
-  remove: () => void;
-  setLngLat: (lngLat: [number, number]) => MapboxMarker;
-  addTo: (map: MapboxMap) => MapboxMarker;
-  getElement: () => HTMLElement;
+type LatLng = { lat: number; lng: number };
+type GoogleMap = {
+  fitBounds: (bounds: GoogleLatLngBounds, padding?: number | GooglePadding) => void;
+  panTo: (latLng: LatLng) => void;
+  setCenter: (latLng: LatLng) => void;
+  setZoom: (zoom: number) => void;
 };
-
-type MapboxMap = {
-  addControl: (control: unknown, position?: string) => void;
-  remove: () => void;
-  flyTo: (options: {
-    center: [number, number];
-    zoom: number;
-    duration: number;
-    essential: boolean;
-  }) => void;
-  isStyleLoaded: () => boolean;
-  once: (event: "load", listener: () => void) => void;
+type GoogleMarker = {
+  addListener?: (event: string, listener: () => void) => void;
+  setMap: (map: GoogleMap | null) => void;
 };
-
-type MapboxCtor = {
-  accessToken: string;
-  Map: new (options: {
-    container: HTMLElement;
-    style: string;
-    center: [number, number];
-    zoom: number;
-    bearing: number;
-    pitch: number;
-  }) => MapboxMap;
-  Marker: new (options: { element: HTMLElement; anchor: "bottom" }) => MapboxMarker;
-  NavigationControl: new () => unknown;
+type GoogleLatLngBounds = {
+  extend: (latLng: LatLng) => void;
+};
+type GooglePadding = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
+type GoogleMapsNamespace = {
+  Map: new (
+    element: HTMLElement,
+    options: Record<string, unknown>
+  ) => GoogleMap;
+  Marker: new (options: Record<string, unknown>) => GoogleMarker;
+  LatLngBounds: new () => GoogleLatLngBounds;
+  SymbolPath: {
+    CIRCLE: number;
+  };
+  Animation: {
+    DROP: number;
+  };
 };
 
 declare global {
   interface Window {
-    mapboxgl?: MapboxCtor;
+    google?: {
+      maps?: GoogleMapsNamespace;
+    };
   }
 }
 
-function ensureStyle(href: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const existing = document.getElementById(MAPBOX_STYLE_ID) as HTMLLinkElement | null;
-    if (existing) {
-      resolve();
-      return;
-    }
-
-    const link = document.createElement("link");
-    link.id = MAPBOX_STYLE_ID;
-    link.rel = "stylesheet";
-    link.href = href;
-    link.onload = () => resolve();
-    link.onerror = () => reject(new Error("Could not load Mapbox styles"));
-    document.head.appendChild(link);
-  });
+function validCoords(item: ItineraryItem): boolean {
+  return (
+    Number.isFinite(item.lat) &&
+    Number.isFinite(item.lng) &&
+    !(item.lat === 0 && item.lng === 0)
+  );
 }
 
-function ensureScript(src: string): Promise<void> {
+function markerIcon(color: string, active: boolean): Record<string, unknown> {
+  return {
+    path: window.google?.maps?.SymbolPath.CIRCLE ?? 0,
+    fillColor: color,
+    fillOpacity: 1,
+    strokeColor: "#ffffff",
+    strokeOpacity: 1,
+    strokeWeight: 2,
+    scale: active ? 10 : 7,
+  };
+}
+
+function ensureGoogleMapsScript(apiKey: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (window.mapboxgl) {
+    if (window.google?.maps) {
       resolve();
       return;
     }
 
-    const existing = document.getElementById(MAPBOX_SCRIPT_ID) as HTMLScriptElement | null;
+    const existing = document.getElementById(GOOGLE_MAPS_SCRIPT_ID) as HTMLScriptElement | null;
     if (existing) {
       existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Could not load Mapbox script")), {
+      existing.addEventListener("error", () => reject(new Error("Could not load Google Maps")), {
         once: true,
       });
       return;
     }
 
     const script = document.createElement("script");
-    script.id = MAPBOX_SCRIPT_ID;
-    script.src = src;
+    script.id = GOOGLE_MAPS_SCRIPT_ID;
     script.async = true;
+    script.defer = true;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}`;
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Could not load Mapbox script"));
+    script.onerror = () => reject(new Error("Could not load Google Maps"));
     document.head.appendChild(script);
   });
 }
 
-function initialView(items: ItineraryItem[]) {
-  const valid = items.filter((i) => Number.isFinite(i.lat) && Number.isFinite(i.lng) && i.lat !== 0);
-  if (!valid.length) {
-    return { longitude: 0, latitude: 20, zoom: 2 };
-  }
-  let minLat = valid[0].lat;
-  let maxLat = valid[0].lat;
-  let minLng = valid[0].lng;
-  let maxLng = valid[0].lng;
-  for (const p of valid) {
-    minLat = Math.min(minLat, p.lat);
-    maxLat = Math.max(maxLat, p.lat);
-    minLng = Math.min(minLng, p.lng);
-    maxLng = Math.max(maxLng, p.lng);
-  }
-  const lat = (minLat + maxLat) / 2;
-  const lng = (minLng + maxLng) / 2;
-  const latPad = Math.max((maxLat - minLat) * 0.2, 0.02);
-  const lngPad = Math.max((maxLng - minLng) * 0.2, 0.02);
-  const zoomLat = Math.log2(360 / (maxLat - minLat + latPad * 2));
-  const zoomLng = Math.log2(360 / (maxLng - minLng + lngPad * 2));
-  const zoom = Math.min(14, Math.max(3, Math.min(zoomLat, zoomLng)));
-  return { longitude: lng, latitude: lat, zoom };
-}
-
 export function ItineraryMap({ items, focusedId, onSelectPin }: Props) {
-  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-  const view = useMemo(() => initialView(items), [items]);
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<MapboxMap | null>(null);
-  const markersRef = useRef<Map<string, MapboxMarker>>(new Map());
+  const mapRef = useRef<GoogleMap | null>(null);
+  const markersRef = useRef<GoogleMarker[]>([]);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const validItems = useMemo(() => items.filter(validCoords), [items]);
 
   useEffect(() => {
-    if (!token || !containerRef.current || mapRef.current) return;
+    if (!apiKey || !containerRef.current || mapRef.current) return;
 
     let active = true;
 
     void (async () => {
       try {
-        await ensureStyle(`https://api.mapbox.com/mapbox-gl-js/v${MAPBOX_VERSION}/mapbox-gl.css`);
-        await ensureScript(`https://api.mapbox.com/mapbox-gl-js/v${MAPBOX_VERSION}/mapbox-gl.js`);
-        if (!active || !containerRef.current || !window.mapboxgl) return;
+        await ensureGoogleMapsScript(apiKey);
+        if (!active || !containerRef.current || !window.google?.maps) return;
 
-        window.mapboxgl.accessToken = token;
-        const map = new window.mapboxgl.Map({
-          container: containerRef.current,
-          style: "mapbox://styles/mapbox/dark-v11",
-          center: [view.longitude, view.latitude],
-          zoom: view.zoom,
-          bearing: 0,
-          pitch: 0,
+        const map = new window.google.maps.Map(containerRef.current, {
+          center: DEFAULT_CENTER,
+          zoom: DEFAULT_ZOOM,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          clickableIcons: false,
+          gestureHandling: "cooperative",
         });
 
-        map.addControl(new window.mapboxgl.NavigationControl(), "top-right");
-        const markReady = () => {
-          if (active) setMapReady(true);
-        };
-        if (map.isStyleLoaded()) {
-          markReady();
-        } else {
-          map.once("load", markReady);
-        }
-
         mapRef.current = map;
+        setMapReady(true);
       } catch (error) {
         if (!active) return;
         setMapError(error instanceof Error ? error.message : "Could not load map");
@@ -184,115 +154,78 @@ export function ItineraryMap({ items, focusedId, onSelectPin }: Props) {
 
     return () => {
       active = false;
-      for (const marker of markersRef.current.values()) {
-        marker.remove();
+      for (const marker of markersRef.current) {
+        marker.setMap(null);
       }
-      markersRef.current.clear();
-      mapRef.current?.remove();
+      markersRef.current = [];
       mapRef.current = null;
       setMapReady(false);
     };
-  }, [token, view.latitude, view.longitude, view.zoom]);
+  }, [apiKey]);
 
   useEffect(() => {
-    if (!mapReady || !mapRef.current || !window.mapboxgl) return;
+    if (!mapReady || !mapRef.current || !window.google?.maps) return;
 
-    const nextIds = new Set<string>();
+    for (const marker of markersRef.current) {
+      marker.setMap(null);
+    }
+    markersRef.current = [];
 
-    for (const it of items) {
-      if (!Number.isFinite(it.lat) || !Number.isFinite(it.lng) || (it.lat === 0 && it.lng === 0)) {
-        continue;
-      }
-
-      nextIds.add(it.id);
-      const color = SLOT_COLORS[it.timeSlot] ?? "#94a3b8";
-      const active = focusedId === it.id;
-      const existing = markersRef.current.get(it.id);
-
-      if (existing) {
-        existing.setLngLat([it.lng, it.lat]);
-        const el = existing.getElement();
-        el.style.backgroundColor = color;
-        el.style.boxShadow = active ? "0 0 0 3px rgba(56,189,248,0.6)" : "";
-        el.style.transform = active ? "scale(1.15)" : "scale(1)";
-        continue;
-      }
-
-      const el = document.createElement("button");
-      el.type = "button";
-      el.title = it.name;
-      el.setAttribute("aria-label", it.name);
-      el.style.width = "16px";
-      el.style.height = "16px";
-      el.style.borderRadius = "9999px";
-      el.style.border = "2px solid white";
-      el.style.boxShadow = active ? "0 0 0 3px rgba(56,189,248,0.6)" : "";
-      el.style.backgroundColor = color;
-      el.style.cursor = "pointer";
-      el.style.transform = active ? "scale(1.15)" : "scale(1)";
-      el.addEventListener("click", (event) => {
-        event.stopPropagation();
-        onSelectPin?.(it.id);
+    for (const item of validItems) {
+      const active = focusedId === item.id;
+      const color = SLOT_COLORS[item.timeSlot] ?? "#94a3b8";
+      const marker = new window.google.maps.Marker({
+        map: mapRef.current,
+        position: { lat: item.lat, lng: item.lng },
+        title: item.name,
+        animation: active ? window.google.maps.Animation.DROP : undefined,
+        icon: markerIcon(color, active),
       });
 
-      const marker = new window.mapboxgl.Marker({ element: el, anchor: "bottom" })
-        .setLngLat([it.lng, it.lat])
-        .addTo(mapRef.current);
+      marker.addListener?.("click", () => {
+        onSelectPin?.(item.id);
+      });
 
-      markersRef.current.set(it.id, marker);
+      markersRef.current.push(marker);
     }
 
-    for (const [id, marker] of markersRef.current.entries()) {
-      if (nextIds.has(id)) continue;
-      marker.remove();
-      markersRef.current.delete(id);
-    }
-  }, [focusedId, items, mapReady, onSelectPin]);
-
-  useEffect(() => {
-    if (!mapReady || !focusedId) return;
-    const item = items.find((i) => i.id === focusedId);
-    if (!item) return;
-    if (!Number.isFinite(item.lat) || !Number.isFinite(item.lng) || (item.lat === 0 && item.lng === 0)) {
+    if (validItems.length === 0) {
+      mapRef.current.setCenter(DEFAULT_CENTER);
+      mapRef.current.setZoom(DEFAULT_ZOOM);
       return;
     }
 
-    const map = mapRef.current;
-    if (!map) return;
-
-    const exec = () => {
-      map.flyTo({
-        center: [item.lng, item.lat],
-        zoom: FLY_ZOOM,
-        duration: FLY_DURATION_MS,
-        essential: true,
-      });
-    };
-
-    if (map.isStyleLoaded()) {
-      exec();
-    } else {
-      map.once("load", exec);
+    if (validItems.length === 1) {
+      mapRef.current.setCenter({ lat: validItems[0].lat, lng: validItems[0].lng });
+      mapRef.current.setZoom(focusedId ? FOCUS_ZOOM : 12);
+      return;
     }
-  }, [focusedId, items, mapReady]);
 
-  if (!token) {
+    const bounds = new window.google.maps.LatLngBounds();
+    for (const item of validItems) {
+      bounds.extend({ lat: item.lat, lng: item.lng });
+    }
+    mapRef.current.fitBounds(bounds, { top: 48, right: 48, bottom: 48, left: 48 });
+  }, [focusedId, mapReady, onSelectPin, validItems]);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !focusedId) return;
+
+    const item = validItems.find((entry) => entry.id === focusedId);
+    if (!item) return;
+
+    mapRef.current.panTo({ lat: item.lat, lng: item.lng });
+    mapRef.current.setZoom(FOCUS_ZOOM);
+  }, [focusedId, mapReady, validItems]);
+
+  if (!apiKey) {
     return (
       <div className="flex h-full min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-surface-muted bg-surface p-6 text-center">
         <p className="font-display text-base font-semibold text-ink">Map disabled</p>
         <p className="mt-2 max-w-sm text-sm text-ink-muted">
-          Add <code className="rounded bg-surface-muted px-1">NEXT_PUBLIC_MAPBOX_TOKEN</code> to{" "}
-          <code className="rounded bg-surface-muted px-1">.env.local</code> to show pins. Get a free
-          token at{" "}
-          <a
-            href="https://mapbox.com/"
-            className="text-accent underline"
-            target="_blank"
-            rel="noreferrer"
-          >
-            mapbox.com
-          </a>
-          .
+          Add <code className="rounded bg-surface-muted px-1">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code>{" "}
+          to <code className="rounded bg-surface-muted px-1">.env.local</code> to show itinerary
+          pins.
         </p>
       </div>
     );

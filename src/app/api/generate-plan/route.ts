@@ -11,8 +11,113 @@ import {
 import { normalizeItinerary } from "@/lib/itinerary-schema";
 import { parseJsonLoose } from "@/lib/json-utils";
 import { ollamaChat } from "@/lib/ollama";
-import { clampTripDays, type ItineraryItem, type TripPreferences } from "@/lib/types";
+import {
+  clampTripDays,
+  type ItineraryItem,
+  type TripPreferences,
+  type TravelCompanion,
+  type TravelPace,
+  type MorningPreference,
+} from "@/lib/types";
 import { fetchDestinationSummary } from "@/lib/wikipedia";
+
+function companionPromptLine(companion: string | undefined): string | null {
+  if (!companion?.trim()) return null;
+  const c = companion.trim() as TravelCompanion;
+  const map: Record<string, string> = {
+    solo: "solo",
+    couple: "a couple",
+    family_with_kids: "a family with kids",
+    friends_group: "a group of friends",
+  };
+  const label = map[c] ?? companion.trim();
+  if (c === "solo") {
+    return `The traveler is going **solo**, so tailor activities accordingly (walkable areas, solo-friendly dining, optional social spots without assuming a group).`;
+  }
+  return `The traveler is going with **${label}**, so tailor activities accordingly (e.g., romantic or intimate spots for couples, kid-friendly venues and pacing for families, lively or group-friendly options for friends).`;
+}
+
+function pacePromptLine(pace: string | undefined): string | null {
+  if (!pace?.trim()) return null;
+  const p = pace.trim() as TravelPace;
+  if (p === "relaxed") {
+    return `Travel pace is **relaxed**: aim for roughly **2–3 substantive activities per day** with lots of free time — keep descriptions calm and unhurried; **omit evening_activity** unless it is very low-key. The fixed daily slots still exist, but treat optional slots lightly and emphasize downtime between stops in the prose.`;
+  }
+  if (p === "moderate") {
+    return `Travel pace is **moderate**: about **3–4 activities per day** with balanced downtime — use the main daily slots fully; add **evening_activity** only when it fits without feeling rushed.`;
+  }
+  if (p === "packed") {
+    return `Travel pace is **packed**: aim for **5+ meaningful experiences per day** where realistic — use **morning_destination, lunch, afternoon_destination, dinner, and evening_activity** whenever venues from the verified list support it; still respect geographic clustering and do not invent places.`;
+  }
+  return `Travel pace preference: **${pace.trim()}** — adjust how dense each day feels in the descriptions and optional evening stops.`;
+}
+
+function morningPromptLine(pref: string | undefined): string | null {
+  if (!pref?.trim()) return null;
+  const m = pref.trim() as MorningPreference;
+  if (m === "early_bird") {
+    return `The traveler prefers an **early start**: schedule the **first activity of each day around 8:00 AM** (mention this timing in descriptions where helpful).`;
+  }
+  if (m === "normal") {
+    return `The traveler prefers a **normal start**: schedule the **first activity of each day around 10:00 AM**.`;
+  }
+  if (m === "late_riser") {
+    return `The traveler is a **late riser**: schedule the **first activity of each day after 11:00 AM**; keep mornings light in the prose.`;
+  }
+  return `Morning preference: **${pref.trim()}** — reflect this in suggested timing for the first stop each day.`;
+}
+
+function tripDatePromptLine(tripDate: string | null | undefined, flexibleDates?: boolean): string | null {
+  if (flexibleDates && !tripDate?.trim()) {
+    return `Trip timing is **flexible** (no fixed month); suggest generally appropriate seasonal ideas without locking to a specific month.`;
+  }
+  const raw = tripDate?.trim();
+  if (!raw) return null;
+  const match = /^(\d{4})-(\d{2})$/.exec(raw);
+  if (!match) {
+    return `Trip is planned for **${raw}** — consider seasonal weather, holidays, and local events where relevant.`;
+  }
+  const y = Number.parseInt(match[1], 10);
+  const mo = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(y) || mo < 1 || mo > 12) {
+    return `Trip is planned for **${raw}** — consider seasonal weather, holidays, and local events where relevant.`;
+  }
+  const monthName = new Date(y, mo - 1, 1).toLocaleString("en-US", { month: "long" });
+  return `The trip is planned for **${monthName} ${y}** — prioritize season-appropriate activities, typical weather, and notable local events or festivals that month.`;
+}
+
+function buildTravelerContextBlock(prefs: TripPreferences): string {
+  const parts = [
+    companionPromptLine(prefs.travelCompanion),
+    pacePromptLine(prefs.travelPace),
+    morningPromptLine(prefs.morningPreference),
+    tripDatePromptLine(prefs.tripDate ?? null, prefs.flexibleDates),
+  ].filter(Boolean) as string[];
+  if (!parts.length) return "";
+  return `\n### Traveler context\n${parts.join("\n")}\n`;
+}
+
+function normalizePlanPreferences(raw: TripPreferences): TripPreferences {
+  const interests =
+    Array.isArray(raw.interests) && raw.interests.length > 0
+      ? raw.interests
+      : (["food", "history"] as TripPreferences["interests"]);
+  const dining =
+    Array.isArray(raw.dining) && raw.dining.length > 0
+      ? raw.dining
+      : (["local cuisine"] as TripPreferences["dining"]);
+  const priorityOrder =
+    Array.isArray(raw.priorityOrder) && raw.priorityOrder.length > 0
+      ? raw.priorityOrder
+      : (["sightseeing", "food", "shopping", "relaxation"] as TripPreferences["priorityOrder"]);
+  return {
+    ...raw,
+    budget: raw.budget ?? "medium",
+    interests: [...interests],
+    dining: [...dining],
+    priorityOrder: [...priorityOrder],
+  };
+}
 
 function buildPlanSystem(dayCount: number): string {
   const plural = dayCount === 1 ? "" : "s";
@@ -62,16 +167,21 @@ function buildUserPrompt(
     : `\nUrban coverage: Shopping, dining, nightlife, and most history venues use a **~15 km** search radius from the destination center.\n`;
   const dayLabel = dayCount === 1 ? "1 day" : `${dayCount} days`;
   const daysWord = dayCount === 1 ? "one logical day" : `${dayCount} logical days`;
+  const uniquenessBlock = `\nUniqueness rule: **Never reuse the same venue anywhere in the trip.** A place may appear at most once across all days and all slots. If you need more variety, choose another verified venue rather than repeating one already used.`;
+  const travelerBlock = buildTravelerContextBlock(prefs);
 
   return `Plan a ${dayLabel} trip.
 
 Destination: ${prefs.destination}
 Budget: ${prefs.budget}
+Accommodation styles: ${prefs.hotelStyles?.join(", ") || "any"}
 Interests: ${prefs.interests.join(", ") || "general"}
 Dining preferences: ${prefs.dining.join(", ") || "any"}
 Priority order (highest first): ${prefs.priorityOrder.join(" > ")}
-${wikiBlock}
+Timing: ${prefs.flexibleDates ? "Flexible dates" : prefs.startDate ? `Start on ${prefs.startDate}` : "No specific date provided"}
+${travelerBlock}${wikiBlock}
 ${regionalBlock}
+${uniquenessBlock}
 ### Verified places (Google Places — select and arrange ONLY from this list; copy exact name, address, placeId, lat, lng, rating, and reviewCount)
 ${verifiedPlacesText}
 
@@ -99,11 +209,12 @@ async function generatePlanJson(
 
 export async function POST(req: Request) {
   try {
-    const prefs = (await req.json()) as TripPreferences;
-    if (!prefs?.destination?.trim()) {
+    const raw = (await req.json()) as TripPreferences;
+    if (!raw?.destination?.trim()) {
       return NextResponse.json({ error: "destination required" }, { status: 400 });
     }
 
+    const prefs = normalizePlanPreferences(raw);
     const dayCount = clampTripDays(prefs.tripDays);
     const prefsWithDays: TripPreferences = { ...prefs, tripDays: dayCount };
 
@@ -143,22 +254,12 @@ export async function POST(req: Request) {
         regionalNatureHint
       );
       parsed = parseJsonLoose(rawJson);
-    } catch {
-      try {
-        const rawJson = await generatePlanJson(
-          prefsWithDays,
-          dayCount,
-          wiki,
-          verifiedPlacesText,
-          regionalNatureHint
-        );
-        parsed = parseJsonLoose(rawJson);
-      } catch {
-        return NextResponse.json(
-          { error: "Could not parse LLM response as JSON. Try again or use a model with strong JSON mode." },
-          { status: 502 }
-        );
-      }
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not parse LLM response as JSON. Try again or use a model with strong JSON mode.";
+      return NextResponse.json({ error: message }, { status: 502 });
     }
 
     let items: ItineraryItem[] = normalizeItinerary(parsed, dest);

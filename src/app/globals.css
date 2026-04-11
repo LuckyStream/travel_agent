@@ -1,21 +1,165 @@
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Sans:wght@300;400;500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --background: #0a0e12;
-  --foreground: #e8eef5;
-  --font-geist-sans: "Avenir Next", "Segoe UI", system-ui, sans-serif;
-  --font-display: "Trebuchet MS", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --background: 40 33% 96%;
+  --foreground: 30 10% 15%;
+  --card: 40 30% 98%;
+  --card-foreground: 30 10% 15%;
+  --popover: 40 30% 98%;
+  --popover-foreground: 30 10% 15%;
+  --primary: 55 30% 42%;
+  --primary-foreground: 40 33% 96%;
+  --secondary: 40 20% 80%;
+  --secondary-foreground: 30 10% 15%;
+  --muted: 40 25% 91%;
+  --muted-foreground: 30 8% 45%;
+  --accent: 198 86% 59%;
+  --accent-foreground: 30 10% 20%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 40 20% 85%;
+  --input: 40 20% 85%;
+  --ring: 55 30% 42%;
+  --radius: 0.5rem;
+  --earth-dark: 30 15% 22%;
+  --earth-olive: 55 30% 42%;
+  --earth-sand: 40 33% 96%;
+  --earth-cream: 40 35% 92%;
+  --earth-warm: 30 40% 60%;
+  --surface: #0f1419;
+  --surface-raised: #1a2332;
+  --surface-muted: #243044;
+  --ink: #e8eef5;
+  --ink-muted: #94a3b8;
+  --accent-solid: #38bdf8;
+  --accent-dim: #0ea5e9;
+  --font-geist-sans: "DM Sans", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Cormorant Garamond", Georgia, serif;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
   min-height: 100vh;
 }
 
-/* Mapbox popup defaults clash with dark theme — keep controls readable */
-.mapboxgl-ctrl-logo {
-  filter: brightness(0.9);
+html {
+  scroll-behavior: smooth;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.35);
+  color: #f8fbff;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display), serif;
+}
+
+.font-display {
+  font-family: var(--font-display), serif;
+}
+
+.bg-earth-dark {
+  background-color: hsl(var(--earth-dark));
+}
+
+.bg-earth-cream {
+  background-color: hsl(var(--earth-cream));
+}
+
+.text-earth-olive {
+  color: hsl(var(--earth-olive));
+}
+
+.text-earth-warm {
+  color: hsl(var(--earth-warm));
+}
+
+.bg-earth-olive {
+  background-color: hsl(var(--earth-olive));
+}
+
+.border-earth-olive {
+  border-color: hsl(var(--earth-olive));
+}
+
+.stamp-badge {
+  width: 120px;
+  height: 120px;
+  border: 3px solid hsl(var(--earth-olive));
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transform: rotate(-15deg);
+  font-family: var(--font-display), serif;
+  font-weight: 700;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  color: hsl(var(--earth-olive));
+  padding: 0.5rem;
+}
+
+.glass-float-card {
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  transition:
+    transform 240ms ease,
+    box-shadow 240ms ease,
+    border-color 240ms ease,
+    background-color 240ms ease;
+}
+
+.glass-float-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.34), rgba(255,255,255,0.04) 48%, rgba(255,255,255,0.18));
+  opacity: 0;
+  transition: opacity 240ms ease;
+  pointer-events: none;
+}
+
+.glass-float-card::after {
+  content: "";
+  position: absolute;
+  inset: -35% auto auto -10%;
+  width: 45%;
+  height: 170%;
+  transform: rotate(24deg);
+  background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0));
+  opacity: 0;
+  transition: opacity 240ms ease, transform 280ms ease;
+  pointer-events: none;
+}
+
+.glass-float-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 18px 42px rgba(110, 97, 61, 0.14);
+  border-color: rgba(122, 110, 74, 0.3);
+  background-color: rgba(255,255,255,0.72);
+}
+
+.glass-float-card:hover::before,
+.glass-float-card:hover::after {
+  opacity: 1;
+}
+
+.glass-float-card:hover::after {
+  transform: translateX(16%) rotate(24deg);
 }

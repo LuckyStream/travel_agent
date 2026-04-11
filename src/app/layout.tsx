@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { SiteFooter } from "@/components/SiteFooter";
 
 export const metadata: Metadata = {
-  title: "Wanderlust — Travel planner",
-  description: "AI-assisted travel recommendations with an interactive map",
+  title: "Personal Traveling Agent",
+  description: "Lovable-style travel planning with AI-assisted recommendations and itinerary building",
 };
 
 export default function RootLayout({
@@ -12,8 +13,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body className="font-sans antialiased bg-[#0a0e12] text-ink">{children}</body>
+    <html lang="en">
+      <body className="font-sans antialiased bg-background text-foreground">
+        <div className="min-h-screen flex flex-col">
+          <div className="flex-1">{children}</div>
+          <SiteFooter />
+        </div>
+      </body>
     </html>
   );
 }

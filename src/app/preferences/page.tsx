@@ -51,6 +51,14 @@ function labelDining(t: DiningTag): string {
   return t.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function normalizeDestinationInput(raw: string): string {
+  const value = raw.trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return "";
+  if (value.includes("localhost") || value.includes("127.0.0.1")) return "";
+  return value;
+}
+
 function PreferencesForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -73,12 +81,13 @@ function PreferencesForm() {
   const [error, setError] = useState<string | null>(null);
   const [loadingMsgIndex, setLoadingMsgIndex] = useState(0);
 
-  const destination = destinationParam;
+  const destination = normalizeDestinationInput(destinationParam);
 
   const prefs = useMemo<TripPreferences>(
     () => ({
       destination,
       tripDays,
+      flexibleDates: true,
       budget,
       interests,
       dining,

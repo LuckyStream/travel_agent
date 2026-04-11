@@ -44,6 +44,21 @@ export type EnrichCoordinateRow = {
   placeId?: string | null;
 };
 
+async function geocodeAddressWithDestination(
+  apiKey: string,
+  address: string,
+  destinationHint: string
+): Promise<{ lat: number; lng: number } | null> {
+  const addr = address.trim();
+  const dest = destinationHint.trim();
+  if (!addr) return null;
+
+  return (
+    (await googleGeocode(addr, apiKey)) ??
+    (dest ? await googleGeocode(`${addr}, ${dest}`, apiKey) : null)
+  );
+}
+
 export async function enrichItemCoordinates(
   items: EnrichCoordinateRow[],
   options?: EnrichCoordinatesOptions
@@ -65,15 +80,38 @@ export async function enrichItemCoordinates(
     const dest = it.destinationHint.trim();
     const nameNorm = it.name.trim().toLowerCase();
 
-    if (key && !skipFind?.has(nameNorm)) {
+    if (key) {
       const pid = it.placeId?.trim();
       if (pid) {
         const exact = await lookupPlaceDetails(key, pid);
         if (exact) {
-          it.lat = exact.lat;
-          it.lng = exact.lng;
           if (exact.address) it.address = exact.address;
           if (exact.placeId) it.placeId = exact.placeId;
+          const addressCoords = exact.address
+            ? await geocodeAddressWithDestination(key, exact.address, dest)
+            : null;
+          it.lat = addressCoords?.lat ?? exact.lat;
+          it.lng = addressCoords?.lng ?? exact.lng;
+          if (i < items.length - 1) {
+            await new Promise((r) => setTimeout(r, 120));
+          }
+          continue;
+        }
+      }
+
+      if (skipFind?.has(nameNorm)) {
+        if (i < items.length - 1) {
+          await new Promise((r) => setTimeout(r, 120));
+        }
+        continue;
+      }
+
+      const addr = it.address?.trim();
+      if (addr) {
+        const geocodedAddress = await geocodeAddressWithDestination(key, addr, dest);
+        if (geocodedAddress) {
+          it.lat = geocodedAddress.lat;
+          it.lng = geocodedAddress.lng;
           if (i < items.length - 1) {
             await new Promise((r) => setTimeout(r, 120));
           }

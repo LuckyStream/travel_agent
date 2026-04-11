@@ -36,6 +36,7 @@ export async function POST(req: Request) {
 
     const userPrompt = `Destination: ${prefs.destination}
 Budget: ${prefs.budget}
+Accommodation styles: ${prefs.hotelStyles?.join(", ") || "any"}
 Interests: ${prefs.interests.join(", ")}
 Dining: ${prefs.dining.join(", ")}
 Priorities: ${prefs.priorityOrder.join(" > ")}
@@ -47,7 +48,8 @@ Replace this activity (same day ${item.day}, slot ${item.timeSlot}):
 Name: ${item.name}
 Description: ${item.description}
 
-Suggest **one** alternative that fits the trip and is noticeably different from the current pick.`;
+Suggest **one** alternative that fits the trip and is noticeably different from the current pick.
+Do not reuse any venue that already appears in the current plan summary.`;
 
     const raw = await ollamaChat(
       [

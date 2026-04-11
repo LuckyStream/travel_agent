@@ -64,14 +64,34 @@ export type ItineraryItem = {
   reviewCount?: number | null;
 };
 
+export type TravelCompanion = "solo" | "couple" | "family_with_kids" | "friends_group";
+
+export type TravelPace = "relaxed" | "moderate" | "packed";
+
+export type MorningPreference = "early_bird" | "normal" | "late_riser";
+
 export type TripPreferences = {
   destination: string;
   /** Number of days to plan (1–14). Omitted in older saved trips → treat as 3. */
   tripDays?: number;
+  /** Optional ISO date string selected by the user for trip start. */
+  startDate?: string;
+  /** True when the user is open to any timing instead of a fixed start date. */
+  flexibleDates?: boolean;
   budget: Budget;
+  /** Optional accommodation styles chosen in the wizard. */
+  hotelStyles?: string[];
   interests: InterestTag[];
   dining: DiningTag[];
   priorityOrder: PriorityKey[];
+  /** Who the traveler is going with — used in the planner prompt. */
+  travelCompanion?: TravelCompanion | string;
+  /** How dense the daily schedule should feel. */
+  travelPace?: TravelPace | string;
+  /** Preferred start time for the first activity of the day. */
+  morningPreference?: MorningPreference | string;
+  /** Target month as YYYY-MM, or null/omitted when flexible. */
+  tripDate?: string | null;
 };
 
 export const DEFAULT_TRIP_DAYS = 3;
