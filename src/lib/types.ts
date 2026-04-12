@@ -70,8 +70,14 @@ export type TravelPace = "relaxed" | "moderate" | "packed";
 
 export type MorningPreference = "early_bird" | "normal" | "late_riser";
 
+/** How the traveler moves — used to tune distance between stops and day-trip reach. */
+export type TripMobility = "walking_transit" | "rental_car" | "own_car";
+
 export type TripPreferences = {
   destination: string;
+  /** Server Geocoding of `destination` — used to center the map before pins exist. */
+  destinationLat?: number;
+  destinationLng?: number;
   /** Number of days to plan (1–14). Omitted in older saved trips → treat as 3. */
   tripDays?: number;
   /** Optional ISO date string selected by the user for trip start. */
@@ -92,6 +98,13 @@ export type TripPreferences = {
   morningPreference?: MorningPreference | string;
   /** Target month as YYYY-MM, or null/omitted when flexible. */
   tripDate?: string | null;
+  /** Walking/transit vs car — affects how far apart same-day stops can be. */
+  mobility?: TripMobility;
+  /**
+   * Short lines learned when the user swaps stops away (e.g. dislikes museums).
+   * Merged with session-persisted hints before calling generate-plan / swap-item.
+   */
+  swapAvoidHints?: string[];
 };
 
 export const DEFAULT_TRIP_DAYS = 3;

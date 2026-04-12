@@ -10,9 +10,11 @@ export async function fetchDestinationSummary(destination: string): Promise<stri
   )}`;
 
   try {
+    // Avoid `next: { revalidate }` here: this helper is called from Route Handlers
+    // (e.g. generate-plan), where Next's fetch cache store may be unavailable and can 500.
     const res = await fetch(url, {
       headers: { Accept: "application/json" },
-      next: { revalidate: 86400 },
+      cache: "no-store",
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { extract?: string; title?: string };

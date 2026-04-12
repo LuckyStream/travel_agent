@@ -35,7 +35,7 @@ export async function GET(req: Request) {
 
   try {
     const res = await fetch(`https://maps.googleapis.com/maps/api/place/details/json?${qs.toString()}`, {
-      next: { revalidate: 3600 },
+      cache: "no-store",
     });
     const data = (await res.json()) as PlaceDetailsResponse;
     if (!res.ok || data.status !== "OK") {
@@ -54,10 +54,13 @@ export async function GET(req: Request) {
       (ref) => `/api/place-photo?ref=${encodeURIComponent(ref)}&maxwidth=1200`
     );
 
-    return NextResponse.json({
-      placeName: data.result?.name ?? null,
-      photos,
-    });
+    return NextResponse.json(
+      {
+        placeName: data.result?.name ?? null,
+        photos,
+      },
+      { headers: { "Cache-Control": "public, max-age=3600, s-maxage=3600" } }
+    );
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Could not fetch place photos" },

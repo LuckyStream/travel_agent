@@ -28,3 +28,9 @@ export function updateTripItems(items: ItineraryItem[]): void {
   if (!cur) return;
   saveTrip({ ...cur, items });
 }
+
+export function updateTripPreferences(preferences: TripPreferences): void {
+  const cur = loadTrip();
+  if (!cur) return;
+  saveTrip({ ...cur, preferences });
+}

@@ -23,7 +23,7 @@ export async function GET(req: Request) {
   try {
     const googleRes = await fetch(`https://maps.googleapis.com/maps/api/place/photo?${qs.toString()}`, {
       redirect: "follow",
-      next: { revalidate: 86400 },
+      cache: "no-store",
     });
 
     if (!googleRes.ok) {

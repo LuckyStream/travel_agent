@@ -11,10 +11,13 @@ import {
   MapPinned,
   MoonStar,
   UtensilsCrossed,
+  X,
 } from "lucide-react";
 import { ItineraryMap } from "@/components/ItineraryMap";
 import { SiteHeader } from "@/components/SiteHeader";
-import { loadTrip, updateTripItems } from "@/lib/session-trip";
+import { loadTrip, updateTripItems, updateTripPreferences } from "@/lib/session-trip";
+import { appendPersistentSwapHints, mergeSwapHintsForApi } from "@/lib/swap-hints-storage";
+import { hintFromSwappedItem, withStrongMuseumPreference } from "@/lib/swap-learning";
 import { itineraryLegKey } from "@/lib/itinerary-legs";
 import {
   clampTripDays,
@@ -100,9 +103,15 @@ function RatingLine({ rating, reviewCount }: { rating?: number | null; reviewCou
 
 function googleMapsHref(item: ItineraryItem, destination: string): string {
   const dest = destination.trim();
-  if (item.address?.trim()) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.address.trim())}`;
+  const name = item.name.trim();
+  /** Name + destination disambiguates common venue names (e.g. many "Museum of Fine Arts"). */
+  const nameInContext = dest ? `${name}, ${dest}` : name;
+  const q = encodeURIComponent(nameInContext);
+
+  if (item.placeId?.trim()) {
+    return `https://www.google.com/maps/search/?api=1&query=${q}&query_place_id=${encodeURIComponent(item.placeId.trim())}`;
   }
+
   const hasCoords =
     Number.isFinite(item.lat) &&
     Number.isFinite(item.lng) &&
@@ -110,11 +119,8 @@ function googleMapsHref(item: ItineraryItem, destination: string): string {
   if (hasCoords) {
     return `https://www.google.com/maps/search/?api=1&query=${item.lat},${item.lng}`;
   }
-  const nameQ = encodeURIComponent(item.name.trim());
-  if (item.placeId?.trim()) {
-    return `https://www.google.com/maps/search/?api=1&query=${nameQ}&query_place_id=${encodeURIComponent(item.placeId.trim())}`;
-  }
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${item.name.trim()}, ${dest}`)}`;
+
+  return `https://www.google.com/maps/search/?api=1&query=${q}`;
 }
 
 function AddressLine({ item, destination }: { item: ItineraryItem; destination: string }) {
@@ -394,7 +400,9 @@ export default function ItineraryPage() {
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [photosLoading, setPhotosLoading] = useState(false);
   const [photosError, setPhotosError] = useState<string | null>(null);
+  const [photoLightboxUrl, setPhotoLightboxUrl] = useState<string | null>(null);
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const coordsRepairAttemptedRef = useRef(false);
 
   useEffect(() => {
     const trip = loadTrip();
@@ -405,6 +413,40 @@ export default function ItineraryPage() {
     setPrefs(trip.preferences);
     setItems(trip.items);
   }, [router]);
+
+  useEffect(() => {
+    const dest = prefs?.destination?.trim();
+    if (!dest || !items.length || coordsRepairAttemptedRef.current) return;
+
+    const needsCoords = items.some((it) => {
+      const lat = typeof it.lat === "number" ? it.lat : Number.parseFloat(String(it.lat));
+      const lng = typeof it.lng === "number" ? it.lng : Number.parseFloat(String(it.lng));
+      return (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng) ||
+        (lat === 0 && lng === 0)
+      );
+    });
+
+    coordsRepairAttemptedRef.current = true;
+    if (!needsCoords) return;
+
+    void (async () => {
+      try {
+        const res = await fetch("/api/itinerary-fill-coords", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items, destination: dest }),
+        });
+        const data = (await res.json()) as { items?: ItineraryItem[]; error?: string };
+        if (!res.ok || !data.items?.length) return;
+        setItems(data.items);
+        updateTripItems(data.items);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [prefs, items]);
 
   useEffect(() => {
     if (!items.length) return;
@@ -502,7 +544,7 @@ export default function ItineraryPage() {
 
     void (async () => {
       try {
-        const res = await fetch(`/api/place-photos?placeId=${encodeURIComponent(placeId)}&limit=6`, {
+        const res = await fetch(`/api/place-photos?placeId=${encodeURIComponent(placeId)}&limit=4`, {
           signal: ctrl.signal,
         });
         const data = (await res.json()) as PlacePhotosResponse;
@@ -523,6 +565,15 @@ export default function ItineraryPage() {
 
     return () => ctrl.abort();
   }, [selectedItem?.placeId]);
+
+  useEffect(() => {
+    if (!photoLightboxUrl) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPhotoLightboxUrl(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [photoLightboxUrl]);
 
   const exportPdf = useCallback(() => {
     if (!prefs || !byDay.length) return;
@@ -578,7 +629,7 @@ export default function ItineraryPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             item,
-            preferences: prefs,
+            preferences: mergeSwapHintsForApi(prefs),
             itinerarySummary: buildSummary(items),
           }),
         });
@@ -587,6 +638,14 @@ export default function ItineraryPage() {
         const next = items.map((i) => (i.id === item.id ? data.item! : i));
         setItems(next);
         updateTripItems(next);
+
+        const hint = hintFromSwappedItem(item);
+        const baseHints = [...new Set([...(prefs.swapAvoidHints ?? []), ...(hint ? [hint] : [])])];
+        const nextHints = withStrongMuseumPreference(baseHints);
+        appendPersistentSwapHints(nextHints);
+        const newPrefs = { ...prefs, swapAvoidHints: nextHints };
+        setPrefs(newPrefs);
+        updateTripPreferences(newPrefs);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Swap failed");
       } finally {
@@ -655,7 +714,11 @@ export default function ItineraryPage() {
             <button
               key={day}
               type="button"
-              onClick={() => setActiveDay(day)}
+              onClick={() => {
+                setActiveDay(day);
+                const dayItems = byDay.find(([d]) => d === day)?.[1] ?? [];
+                setFocusedId(dayItems[0]?.id ?? null);
+              }}
               className={`shrink-0 rounded-full border px-4 py-2 text-sm font-medium transition ${
                 activeDay === day
                   ? "border-primary bg-primary text-primary-foreground"
@@ -769,14 +832,21 @@ export default function ItineraryPage() {
                 <p className="text-xs text-amber-700">{photosError}</p>
               ) : photoUrls.length ? (
                 <div className="grid grid-cols-2 gap-2">
-                  {photoUrls.map((url, idx) => (
-                    <img
+                  {photoUrls.slice(0, 4).map((url, idx) => (
+                    <button
                       key={`${url}-${idx}`}
-                      src={url}
-                      alt={`${selectedItem?.name ?? "Place"} photo ${idx + 1}`}
-                      className="h-24 w-full rounded-xl object-cover"
-                      loading="lazy"
-                    />
+                      type="button"
+                      onClick={() => setPhotoLightboxUrl(url)}
+                      className="group relative block overflow-hidden rounded-xl ring-offset-2 focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <img
+                        src={url}
+                        alt={`${selectedItem?.name ?? "Place"} photo ${idx + 1}`}
+                        className="h-24 w-full object-cover transition group-hover:scale-105"
+                        loading="lazy"
+                      />
+                      <span className="sr-only">Enlarge photo {idx + 1}</span>
+                    </button>
                   ))}
                 </div>
               ) : (
@@ -784,6 +854,9 @@ export default function ItineraryPage() {
                   No photos for this stop. Try another item or check Google Places API quota.
                 </p>
               )}
+              {photoUrls.length > 0 ? (
+                <p className="mt-2 text-[11px] text-muted-foreground">Tap a photo to view larger · up to 4 shown</p>
+              ) : null}
             </div>
 
             <div className="rounded-[28px] border border-border bg-card/90 p-5 shadow-[0_4px_30px_rgba(0,0,0,0.06)]">
@@ -793,6 +866,16 @@ export default function ItineraryPage() {
               <ItineraryMap
                 items={items}
                 focusedId={focusedId}
+                fallbackDestination={prefs.destination}
+                fallbackCenter={
+                  prefs.destinationLat != null &&
+                  prefs.destinationLng != null &&
+                  Number.isFinite(prefs.destinationLat) &&
+                  Number.isFinite(prefs.destinationLng) &&
+                  !(prefs.destinationLat === 0 && prefs.destinationLng === 0)
+                    ? { lat: prefs.destinationLat, lng: prefs.destinationLng }
+                    : null
+                }
                 onSelectPin={(id) => (id ? setFocusedId(id) : undefined)}
               />
               <p className="mt-3 text-xs leading-5 text-muted-foreground">
@@ -802,6 +885,31 @@ export default function ItineraryPage() {
           </aside>
         </div>
       </main>
+
+      {photoLightboxUrl ? (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Photo preview"
+          onClick={() => setPhotoLightboxUrl(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setPhotoLightboxUrl(null)}
+            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white transition hover:bg-white/20"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <img
+            src={photoLightboxUrl}
+            alt=""
+            className="max-h-[min(90vh,900px)] max-w-full rounded-lg object-contain shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -44,6 +44,10 @@ export type EnrichCoordinateRow = {
   placeId?: string | null;
 };
 
+function coordsUsable(lat: number, lng: number): boolean {
+  return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
+}
+
 async function geocodeAddressWithDestination(
   apiKey: string,
   address: string,
@@ -99,7 +103,8 @@ export async function enrichItemCoordinates(
         }
       }
 
-      if (skipFind?.has(nameNorm)) {
+      // Pinned names skip Text Search only when coords are already trustworthy.
+      if (skipFind?.has(nameNorm) && coordsUsable(it.lat, it.lng)) {
         if (i < items.length - 1) {
           await new Promise((r) => setTimeout(r, 120));
         }
@@ -151,6 +156,50 @@ export async function enrichItemCoordinates(
       }
       if (i < items.length - 1) {
         await new Promise((r) => setTimeout(r, 1100));
+      }
+    }
+  }
+
+  // Second pass: anything still without pins (e.g. Places Details failed, quota blips, or skip edge cases).
+  if (key) {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (coordsUsable(it.lat, it.lng)) continue;
+
+      const dest = it.destinationHint.trim();
+      const name = it.name.trim();
+      if (!dest || !name) continue;
+
+      const center = await ensureDestCenter(dest);
+      if (!center) continue;
+
+      let found =
+        (await findPlaceFromText(key, `${name}, ${dest}`, center.lat, center.lng)) ?? null;
+      if (!found && it.address?.trim()) {
+        await new Promise((r) => setTimeout(r, 120));
+        found = await findPlaceFromText(
+          key,
+          `${it.address!.trim()}, ${dest}`,
+          center.lat,
+          center.lng
+        );
+      }
+
+      if (found) {
+        it.lat = found.lat;
+        it.lng = found.lng;
+        if (found.address) it.address = found.address;
+        if (found.placeId) it.placeId = found.placeId;
+      } else {
+        const geo = await googleGeocode(`${name}, ${dest}`, key);
+        if (geo) {
+          it.lat = geo.lat;
+          it.lng = geo.lng;
+        }
+      }
+
+      if (i < items.length - 1) {
+        await new Promise((r) => setTimeout(r, 200));
       }
     }
   }

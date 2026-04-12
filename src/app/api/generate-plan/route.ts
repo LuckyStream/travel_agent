@@ -5,9 +5,11 @@ import {
   formatVerifiedPlacesForPrompt,
   GOOGLE_NEARBY_MAX_RADIUS_METERS,
   interestsPreferRegionalSearch,
-  snapItineraryItemsToVerifiedCandidates,
   type GooglePlaceCandidate,
 } from "@/lib/google-places";
+import { enforceItineraryToVerifiedCandidates } from "@/lib/enforce-verified-itinerary";
+import { swapMorningAfternoonIfShorter } from "@/lib/itinerary-geo-order";
+import { replaceOneOutlierStopFromVerifiedList } from "@/lib/itinerary-outlier-replace";
 import { normalizeItinerary } from "@/lib/itinerary-schema";
 import { parseJsonLoose } from "@/lib/json-utils";
 import { ollamaChat } from "@/lib/ollama";
@@ -67,6 +69,17 @@ function morningPromptLine(pref: string | undefined): string | null {
   return `Morning preference: **${pref.trim()}** — reflect this in suggested timing for the first stop each day.`;
 }
 
+function mobilityPromptLine(mobility: TripPreferences["mobility"]): string {
+  const m = mobility ?? "walking_transit";
+  if (m === "walking_transit") {
+    return `**Getting around:** Mostly **walking and public transit** — keep each day's stops **tight** geographically; avoid assuming a private car for hops between venues.`;
+  }
+  if (m === "rental_car") {
+    return `**Getting around:** **Rental car** — same-day plans may include **outer neighborhoods or short out-of-town legs** (~up to ~1 hr drive) when it matches interests; still avoid pointless zig-zags.`;
+  }
+  return `**Getting around:** **Own car or easy driving** — you may **mix downtown and farther sights** in one day when it improves the route; regional day-trip style stops are acceptable when interests justify them.`;
+}
+
 function tripDatePromptLine(tripDate: string | null | undefined, flexibleDates?: boolean): string | null {
   if (flexibleDates && !tripDate?.trim()) {
     return `Trip timing is **flexible** (no fixed month); suggest generally appropriate seasonal ideas without locking to a specific month.`;
@@ -86,12 +99,19 @@ function tripDatePromptLine(tripDate: string | null | undefined, flexibleDates?:
   return `The trip is planned for **${monthName} ${y}** — prioritize season-appropriate activities, typical weather, and notable local events or festivals that month.`;
 }
 
+function swapLearningPromptLine(prefs: TripPreferences): string | null {
+  if (!prefs.swapAvoidHints?.length) return null;
+  return `**Personalization (from swaps):** The traveler replaced stops they did not want. When choosing from the verified list, **avoid repeating those themes** where good alternatives exist:\n${prefs.swapAvoidHints.map((h) => `- ${h}`).join("\n")}`;
+}
+
 function buildTravelerContextBlock(prefs: TripPreferences): string {
   const parts = [
     companionPromptLine(prefs.travelCompanion),
     pacePromptLine(prefs.travelPace),
     morningPromptLine(prefs.morningPreference),
+    mobilityPromptLine(prefs.mobility),
     tripDatePromptLine(prefs.tripDate ?? null, prefs.flexibleDates),
+    swapLearningPromptLine(prefs),
   ].filter(Boolean) as string[];
   if (!parts.length) return "";
   return `\n### Traveler context\n${parts.join("\n")}\n`;
@@ -139,18 +159,17 @@ Each day object must have:
   - "evening_activity": optional — omit the key or use null if none; otherwise bar, night market, show, etc.
 
 Each slot object MUST have:
-  - "name": string — must match a **verified place** from the user message when you use that venue (exact name).
+  - "placeId": string — **primary key.** Copy the **exact** \`placeId:\` value from one line in the verified list. Do **not** shorten, alter, or invent IDs; invalid IDs are removed server-side and the stop may be reassigned.
+  - "name": string — **exact** same spelling as that same list line (the venue name in quotes).
   - "description": string — **include the Google rating and review count** in the prose (e.g. "4.6★, 1,240 reviews") plus a short useful line (cuisine, vibe, or what to see).
-  - "address": string (copy from the verified list)
-  - "placeId": string (copy exactly from the verified list)
-  - "lat": number (WGS84)
-  - "lng": number (WGS84)
-  - "rating": number (1–5, from the verified list for that place)
-  - "reviewCount": integer (non‑negative, from the verified list)
+  - "address": string (copy from that list line)
+  - "rating": number (1–5, from that list line)
+  - "reviewCount": integer (non‑negative, from that list line)
+  - "lat" and "lng": optional numbers — if omitted, the server fills them from the verified list using **placeId**. If you include them, they must match the list exactly; otherwise omit them.
 
-**Choose from the following verified places only.** Do **not** invent new locations, coordinates, ratings, or review counts. Use only entries supplied under "Verified places" in the user message. If nothing fits a slot perfectly, pick the closest real option from the same list.
+**Choose from the following verified places only.** Do **not** invent venues, **placeId** values, coordinates, ratings, or review counts. Use only entries under "Verified places" in the user message. If nothing fits a slot perfectly, pick the closest real option from the same list.
 
-**Group activities geographically by day.** Each day's morning visit, lunch, afternoon visit, dinner, and optional evening stop should be **physically close** to each other to minimize travel time. **Do not** mix far-apart parts of the region on the same day.`;
+**Group activities geographically by day.** Each day's morning visit, lunch, afternoon visit, dinner, and optional evening stop should form a **sensible tour**: consecutive stops should usually be **walkable or a short drive** apart. **Avoid zig-zags** (e.g. downtown → far suburb → back downtown the same day). If you pick a major museum or site that is far from the lunch neighborhood, place it when it fits the **flow** (often **morning** before crossing the city, or use a **different day** for that side of town). **Do not** sandwich one distant stop between clusters of nearby stops unless unavoidable.`;
 }
 
 function buildUserPrompt(
@@ -158,7 +177,8 @@ function buildUserPrompt(
   dayCount: number,
   wiki: string | null,
   verifiedPlacesText: string,
-  regionalNatureHint: boolean
+  regionalNatureHint: boolean,
+  refinementContext: string
 ): string {
   const wikiBlock = wiki ? `\nDestination context (Wikipedia):\n${wiki}\n` : "";
   const kmApprox = Math.round(GOOGLE_NEARBY_MAX_RADIUS_METERS / 1000);
@@ -169,6 +189,9 @@ function buildUserPrompt(
   const daysWord = dayCount === 1 ? "one logical day" : `${dayCount} logical days`;
   const uniquenessBlock = `\nUniqueness rule: **Never reuse the same venue anywhere in the trip.** A place may appear at most once across all days and all slots. If you need more variety, choose another verified venue rather than repeating one already used.`;
   const travelerBlock = buildTravelerContextBlock(prefs);
+  const refineBlock = refinementContext.trim()
+    ? `\n### Chat refinements\nAfter locking their profile, the traveler continued in chat. Reflect these wishes when choosing venues and tone (without breaking the verified-places rule):\n${refinementContext.trim()}\n`
+    : "";
 
   return `Plan a ${dayLabel} trip.
 
@@ -181,11 +204,13 @@ Priority order (highest first): ${prefs.priorityOrder.join(" > ")}
 Timing: ${prefs.flexibleDates ? "Flexible dates" : prefs.startDate ? `Start on ${prefs.startDate}` : "No specific date provided"}
 ${travelerBlock}${wikiBlock}
 ${regionalBlock}
-${uniquenessBlock}
-### Verified places (Google Places — select and arrange ONLY from this list; copy exact name, address, placeId, lat, lng, rating, and reviewCount)
+${uniquenessBlock}${refineBlock}
+### Verified places (Google Places — select and arrange ONLY from this list)
+Rules: **placeId** must match one \`placeId:\` below verbatim. **name** must match the quoted name on that same line. You may omit **lat**/**lng** per slot; the server resolves coordinates from **placeId**.
+
 ${verifiedPlacesText}
 
-Respect budget and priorities. Build ${daysWord} with geographically clustered stops per day.`;
+Respect budget and priorities. Build ${daysWord} with **tight geographic routing** per day: the path morning → lunch → afternoon → dinner should read like one continuous area or a logical one-way move, not alternating ends of the city.`;
 }
 
 async function generatePlanJson(
@@ -193,14 +218,22 @@ async function generatePlanJson(
   dayCount: number,
   wiki: string | null,
   verifiedPlacesText: string,
-  regionalNatureHint: boolean
+  regionalNatureHint: boolean,
+  refinementContext: string
 ): Promise<string> {
   return ollamaChat(
     [
       { role: "system", content: buildPlanSystem(dayCount) },
       {
         role: "user",
-        content: buildUserPrompt(prefs, dayCount, wiki, verifiedPlacesText, regionalNatureHint),
+        content: buildUserPrompt(
+          prefs,
+          dayCount,
+          wiki,
+          verifiedPlacesText,
+          regionalNatureHint,
+          refinementContext
+        ),
       },
     ],
     { format: "json", temperature: 0.45 }
@@ -209,12 +242,16 @@ async function generatePlanJson(
 
 export async function POST(req: Request) {
   try {
-    const raw = (await req.json()) as TripPreferences;
-    if (!raw?.destination?.trim()) {
+    const rawBody = (await req.json()) as TripPreferences & { refinementContext?: unknown };
+    const refinementContext =
+      typeof rawBody.refinementContext === "string" ? rawBody.refinementContext.trim() : "";
+    const { refinementContext: _drop, ...rawPrefs } = rawBody;
+    void _drop;
+    if (!rawPrefs?.destination?.trim()) {
       return NextResponse.json({ error: "destination required" }, { status: 400 });
     }
 
-    const prefs = normalizePlanPreferences(raw);
+    const prefs = normalizePlanPreferences(rawPrefs as TripPreferences);
     const dayCount = clampTripDays(prefs.tripDays);
     const prefsWithDays: TripPreferences = { ...prefs, tripDays: dayCount };
 
@@ -251,9 +288,27 @@ export async function POST(req: Request) {
         dayCount,
         wiki,
         verifiedPlacesText,
-        regionalNatureHint
+        regionalNatureHint,
+        refinementContext
       );
       parsed = parseJsonLoose(rawJson);
+      if (typeof parsed === "string") {
+        parsed = parseJsonLoose(parsed);
+      }
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const w = parsed as Record<string, unknown>;
+        for (const k of ["json", "data", "output", "text", "content", "itinerary_json"]) {
+          const inner = w[k];
+          if (typeof inner === "string" && /[\[{]/.test(inner.trim())) {
+            try {
+              parsed = parseJsonLoose(inner);
+              break;
+            } catch {
+              /* keep outer */
+            }
+          }
+        }
+      }
     } catch (error) {
       const message =
         error instanceof Error
@@ -271,10 +326,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const pinnedNames =
-      verifiedCandidates.length > 0
-        ? snapItineraryItemsToVerifiedCandidates(items, verifiedCandidates)
-        : new Set<string>();
+    const pinnedNames = enforceItineraryToVerifiedCandidates(items, verifiedCandidates);
 
     const forGeo = items.map((it) => ({
       name: it.name,
@@ -295,6 +347,13 @@ export async function POST(req: Request) {
       address: forGeo[i].address ?? it.address ?? null,
       placeId: forGeo[i].placeId ?? it.placeId ?? null,
     }));
+
+    swapMorningAfternoonIfShorter(items);
+
+    if (verifiedCandidates.length > 0) {
+      replaceOneOutlierStopFromVerifiedList(items, verifiedCandidates);
+      replaceOneOutlierStopFromVerifiedList(items, verifiedCandidates);
+    }
 
     return NextResponse.json({ items, preferences: prefsWithDays });
   } catch (e) {

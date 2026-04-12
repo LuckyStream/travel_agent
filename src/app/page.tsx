@@ -5,7 +5,9 @@ import { Sparkles } from "lucide-react";
 import { DestinationAutocomplete } from "@/components/DestinationAutocomplete";
 import { DestinationChat } from "@/components/DestinationChat";
 import { SiteHeader } from "@/components/SiteHeader";
+import { QuickPlanChat } from "@/components/QuickPlanChat";
 import { TravelPlannerWizard } from "@/components/TravelPlannerWizard";
+import type { TripPreferences } from "@/lib/types";
 
 const heroSlides = [
   { image: "/hero-slides/01-santorini.jpg", alt: "Santorini white cliffs and blue sea" },
@@ -31,24 +33,62 @@ const months = [
   "December",
 ] as const;
 
-type ActiveView = "home" | "wizard";
+type ActiveView = "home" | "quick" | "wizard";
 
 export default function HomePage() {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeView, setActiveView] = useState<ActiveView>("home");
-  const [wizardDestination, setWizardDestination] = useState("");
+  const [planDestination, setPlanDestination] = useState("");
+  /** Bumps when starting a new quick session so the chat flow remounts cleanly. */
+  const [quickSessionKey, setQuickSessionKey] = useState(0);
   const [chatOpen, setChatOpen] = useState(false);
+  /** When true, wizard Back from step 1 returns to quick plan instead of home. */
+  const [wizardFromQuick, setWizardFromQuick] = useState(false);
+  const [wizardInitialPrefs, setWizardInitialPrefs] = useState<Partial<TripPreferences> | null>(null);
+  const [wizardSessionKey, setWizardSessionKey] = useState(0);
+
+  const launchQuickPlan = useCallback((destination?: string) => {
+    setPlanDestination(destination ?? "");
+    setQuickSessionKey((k) => k + 1);
+    setActiveView("quick");
+  }, []);
 
   const launchWizard = useCallback((destination?: string) => {
-    setWizardDestination(destination ?? "");
+    setPlanDestination(destination ?? "");
+    setWizardFromQuick(false);
+    setWizardInitialPrefs(null);
+    setWizardSessionKey((k) => k + 1);
     setActiveView("wizard");
     window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
   }, []);
 
+  const openWizardFromQuickPlan = useCallback((preferences: TripPreferences) => {
+    const dest = preferences.destination?.trim();
+    if (dest && dest !== "not_sure") {
+      setPlanDestination(dest);
+    }
+    setWizardFromQuick(true);
+    setWizardInitialPrefs(preferences);
+    setWizardSessionKey((k) => k + 1);
+    setActiveView("wizard");
+    window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+  }, []);
+
+  const handleWizardExit = useCallback(() => {
+    if (wizardFromQuick) {
+      setActiveView("quick");
+      setWizardFromQuick(false);
+      setWizardInitialPrefs(null);
+      return;
+    }
+    setActiveView("home");
+    setSearchQuery("");
+  }, [wizardFromQuick]);
+
   const handleSearch = () => {
     if (!searchQuery.trim()) return;
-    launchWizard(searchQuery.trim());
+    launchQuickPlan(searchQuery.trim());
   };
 
   const handleBackToHome = useCallback(() => {
@@ -58,8 +98,8 @@ export default function HomePage() {
 
   const handleAiConfirmedDestination = useCallback((destination: string) => {
     setChatOpen(false);
-    launchWizard(destination);
-  }, [launchWizard]);
+    launchQuickPlan(destination);
+  }, [launchQuickPlan]);
 
   useEffect(() => {
     if (activeView !== "home") return;
@@ -68,6 +108,14 @@ export default function HomePage() {
     }, 6000);
     return () => window.clearInterval(timer);
   }, [activeView]);
+
+  useEffect(() => {
+    if (activeView !== "quick") return;
+    const id = requestAnimationFrame(() => {
+      document.getElementById("quick-plan-anchor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [activeView, quickSessionKey]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -79,16 +127,16 @@ export default function HomePage() {
             {heroSlides.map((slide, index) => (
               <div
                 key={slide.image}
-                className={`absolute inset-0 transition-opacity duration-1000 ${
+                className={`pointer-events-none absolute inset-0 transition-opacity duration-1000 ${
                   index === currentSlide ? "opacity-100" : "opacity-0"
                 }`}
               >
                 <img src={slide.image} alt={slide.alt} className="h-full w-full object-cover" />
               </div>
             ))}
-            <div className="absolute inset-0 bg-gradient-to-b from-foreground/40 via-foreground/20 to-foreground/50" />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-foreground/40 via-foreground/20 to-foreground/50" />
 
-            <div className="stamp-badge absolute right-8 top-8 hidden border-primary-foreground/60 bg-primary-foreground/5 text-primary-foreground backdrop-blur-sm md:flex md:right-16 md:top-12">
+            <div className="pointer-events-none stamp-badge absolute right-8 top-8 hidden border-primary-foreground/60 bg-primary-foreground/5 text-primary-foreground backdrop-blur-sm md:flex md:right-16 md:top-12">
               <span>
                 Your
                 <br />
@@ -100,8 +148,8 @@ export default function HomePage() {
               </span>
             </div>
 
-            <div className="relative flex h-full max-w-7xl flex-col justify-end px-6 pb-20 md:px-16 lg:px-24">
-              <div>
+            <div className="relative z-30 flex h-full max-w-7xl flex-col justify-end px-6 pb-20 md:px-16 lg:px-24">
+              <div className="pointer-events-auto">
                 <p className="mb-3 text-xs font-medium uppercase tracking-[0.3em] text-primary-foreground/60">
                   YOUR PERSONAL TRAVELING AGENT
                 </p>
@@ -114,13 +162,14 @@ export default function HomePage() {
                   Where do you want to go?
                 </p>
 
-                <div className="flex max-w-2xl flex-col items-stretch gap-3 sm:flex-row">
-                  <div className="flex-1">
+                <div className="relative z-50 flex max-w-2xl flex-col items-stretch gap-3 sm:flex-row">
+                  <div className="min-w-0 flex-1">
                     <DestinationAutocomplete
                       value={searchQuery}
                       onChange={setSearchQuery}
                       onSubmit={handleSearch}
-                      onSelectSuggestion={(value) => launchWizard(value)}
+                      onSelectSuggestion={(value) => launchQuickPlan(value)}
+                      showSearchButton
                       className="w-full"
                       inputClassName="w-full min-h-[76px] rounded-[30px] border border-primary-foreground/10 bg-card/75 py-6 pl-8 pr-8 text-base text-foreground shadow-[0_10px_36px_rgba(0,0,0,0.14)] backdrop-blur-xl transition-shadow duration-500 hover:shadow-[0_14px_44px_rgba(0,0,0,0.2)] placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                     />
@@ -144,10 +193,24 @@ export default function HomePage() {
                     </div>
                   </button>
                 </div>
+                <p className="relative z-0 mt-4 max-w-2xl text-xs text-primary-foreground/80">
+                  Want every option?{" "}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      launchWizard(searchQuery.trim() || undefined);
+                    }}
+                    className="cursor-pointer font-semibold underline decoration-primary-foreground/40 underline-offset-2 hover:decoration-primary-foreground"
+                  >
+                    Open the step-by-step planner
+                  </button>
+                </p>
               </div>
             </div>
 
-            <div className="absolute bottom-0 left-0 right-0">
+            <div className="pointer-events-none absolute bottom-0 left-0 right-0">
               <svg
                 viewBox="0 0 1440 60"
                 fill="none"
@@ -183,12 +246,23 @@ export default function HomePage() {
             </div>
           </section>
         </main>
+      ) : activeView === "quick" ? (
+        <main id="quick-plan-anchor" className="min-h-screen scroll-mt-4 bg-background">
+          <QuickPlanChat
+            key={quickSessionKey}
+            initialDestination={planDestination}
+            onBack={handleBackToHome}
+            onOpenFullPlanner={openWizardFromQuickPlan}
+          />
+        </main>
       ) : (
         <main className="min-h-screen">
           <TravelPlannerWizard
-            initialDestination={wizardDestination}
+            key={wizardSessionKey}
+            initialDestination={planDestination}
+            initialPreferences={wizardInitialPrefs ?? undefined}
             onAskAi={() => setChatOpen(true)}
-            onBack={handleBackToHome}
+            onBack={handleWizardExit}
           />
         </main>
       )}

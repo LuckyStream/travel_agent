@@ -5,13 +5,13 @@ import { useRouter } from "next/navigation";
 import {
   Building2,
   CalendarDays,
+  Car,
   Landmark,
   Palmtree,
   Trees,
   Mountain,
   ArrowLeft,
   ArrowRight,
-  Bed,
   ChefHat,
   Check,
   Camera,
@@ -25,25 +25,28 @@ import {
   ShoppingBag,
   Sparkles,
   Soup,
-  Star,
   UtensilsCrossed,
   Waves,
 } from "lucide-react";
 import { DestinationAutocomplete } from "@/components/DestinationAutocomplete";
+import { fetchDestinationCenter } from "@/lib/fetch-destination-center";
+import { mergeSwapHintsForApi } from "@/lib/swap-hints-storage";
 import { saveTrip } from "@/lib/session-trip";
-import type {
-  Budget,
-  DiningTag,
-  InterestTag,
-  ItineraryItem,
-  MorningPreference,
-  PriorityKey,
-  TravelCompanion,
-  TravelPace,
-  TripPreferences,
+import {
+  clampTripDays,
+  type Budget,
+  type DiningTag,
+  type InterestTag,
+  type ItineraryItem,
+  type MorningPreference,
+  type PriorityKey,
+  type TravelCompanion,
+  type TravelPace,
+  type TripMobility,
+  type TripPreferences,
 } from "@/lib/types";
 
-type Step = "days" | "vibe" | "interests" | "hotels" | "dining" | "extras" | "result";
+type Step = "days" | "vibe" | "interests" | "dining" | "extras" | "result";
 
 type OptionItem = {
   id: string;
@@ -56,7 +59,6 @@ const STEPS: { key: Exclude<Step, "result">; label: string }[] = [
   { key: "days", label: "Duration" },
   { key: "vibe", label: "City Style" },
   { key: "interests", label: "Interests" },
-  { key: "hotels", label: "Hotels" },
   { key: "dining", label: "Dining" },
   { key: "extras", label: "Trip details" },
 ];
@@ -90,6 +92,12 @@ const MORNING_OPTIONS: { value: MorningPreference; label: string; hint: string }
   { value: "early_bird", label: "Early Bird", hint: "Start by 8 AM" },
   { value: "normal", label: "Normal", hint: "Start by 10 AM" },
   { value: "late_riser", label: "Late Riser", hint: "Start after 11 AM" },
+];
+
+const MOBILITY_OPTIONS: { value: TripMobility; label: string; hint: string }[] = [
+  { value: "walking_transit", label: "Walking & transit", hint: "Keep each day compact" },
+  { value: "rental_car", label: "Rental car", hint: "Some farther stops OK" },
+  { value: "own_car", label: "I have a car", hint: "Mix near and far in one day" },
 ];
 
 const SEASON_MONTHS = [
@@ -132,13 +140,6 @@ const INTERESTS: Array<OptionItem & { value: InterestTag }> = [
   { id: "nature", value: "nature", title: "Nature & Views", desc: "Parks, coastlines, and scenic escapes", icon: Waves },
 ];
 
-const HOTELS: Array<OptionItem & { budget: Budget }> = [
-  { id: "budget", budget: "low", title: "Budget Hostels", desc: "Affordable, simple, and social", icon: Bed },
-  { id: "boutique", budget: "medium", title: "Boutique Hotels", desc: "Balanced comfort and style", icon: Building2 },
-  { id: "luxury", budget: "high", title: "Luxury Resorts", desc: "Premium comfort and standout stays", icon: Star },
-  { id: "local", budget: "medium", title: "Local Stays", desc: "Apartments, homes, and neighborhood charm", icon: Home },
-];
-
 const DINING: Array<OptionItem & { value: DiningTag }> = [
   { id: "street food", value: "street food", title: "Street Food", desc: "Authentic and affordable local bites", icon: Soup },
   { id: "local cuisine", value: "local cuisine", title: "Local Restaurants", desc: "Traditional cuisine and signature dishes", icon: ChefHat },
@@ -148,9 +149,11 @@ const DINING: Array<OptionItem & { value: DiningTag }> = [
 
 const stepContent: Record<Exclude<Step, "result">, { heading: string; sub: string }> = {
   days: { heading: "How many days?", sub: "Choose your trip duration" },
-  vibe: { heading: "What's your travel vibe?", sub: "Choose the atmosphere that speaks to you" },
+  vibe: {
+    heading: "What's your travel vibe?",
+    sub: "Select all that fit — we blend them. Quick Plan answers pre-select matching vibes.",
+  },
   interests: { heading: "What excites you most?", sub: "Select all the experiences you'd love to have" },
-  hotels: { heading: "Where do you want to stay?", sub: "Select all accommodation styles that fit you" },
   dining: { heading: "How do you like to eat?", sub: "Select your dining preferences" },
   extras: {
     heading: "Almost there — a few details",
@@ -166,11 +169,73 @@ function normalizeDestinationInput(raw: string): string {
   return value;
 }
 
-function deriveBudgetFromHotelIds(hotelIds: string[]): Budget {
-  const selected = HOTELS.filter((item) => hotelIds.includes(item.id));
-  if (selected.some((item) => item.budget === "high")) return "high";
-  if (selected.some((item) => item.budget === "medium")) return "medium";
-  return "low";
+function initialBudgetFromPrefs(p?: Partial<TripPreferences> | null): Budget {
+  const b = p?.budget;
+  if (b === "low" || b === "medium" || b === "high") return b;
+  return "medium";
+}
+
+function wizardSeedFromQuickPlan(p?: Partial<TripPreferences> | null): {
+  destination: string;
+  selectedDays: number;
+  flexibleDates: boolean;
+  startDate: string;
+  selectedInterests: InterestTag[];
+  selectedDining: DiningTag[];
+  travelCompanion: TravelCompanion;
+  travelPace: TravelPace;
+  morningPreference: MorningPreference;
+  mobility: TripMobility;
+  tripSeasonFlexible: boolean;
+  tripMonth: string;
+  tripYear: string;
+  budget: Budget;
+} {
+  const td = p?.tripDate?.trim();
+  let tripMonth = "";
+  let tripYear = "";
+  let tripSeasonFlexible = true;
+  if (td && /^\d{4}-\d{2}$/.test(td)) {
+    tripSeasonFlexible = false;
+    tripYear = td.slice(0, 4);
+    tripMonth = td.slice(5, 7);
+  } else if (p?.flexibleDates === false && p.tripDate) {
+    tripSeasonFlexible = false;
+  }
+
+  const companion = p?.travelCompanion;
+  const pace = p?.travelPace;
+  const morning = p?.morningPreference;
+  const mob = p?.mobility;
+
+  return {
+    destination: "",
+    selectedDays: p?.tripDays != null ? clampTripDays(p.tripDays) : 3,
+    flexibleDates: p?.flexibleDates ?? false,
+    startDate: p?.startDate ?? "",
+    selectedInterests: p?.interests?.length ? [...p.interests] : [],
+    selectedDining: p?.dining?.length ? [...p.dining] : [],
+    travelCompanion:
+      companion === "solo" ||
+      companion === "couple" ||
+      companion === "family_with_kids" ||
+      companion === "friends_group"
+        ? companion
+        : "solo",
+    travelPace: pace === "relaxed" || pace === "moderate" || pace === "packed" ? pace : "moderate",
+    morningPreference:
+      morning === "early_bird" || morning === "normal" || morning === "late_riser"
+        ? morning
+        : "normal",
+    mobility:
+      mob === "walking_transit" || mob === "rental_car" || mob === "own_car"
+        ? mob
+        : "walking_transit",
+    tripSeasonFlexible,
+    tripMonth,
+    tripYear,
+    budget: initialBudgetFromPrefs(p),
+  };
 }
 
 function OptionCard({
@@ -225,28 +290,69 @@ function OptionCard({
   );
 }
 
-function combineInterests(vibe: string, interests: InterestTag[]): InterestTag[] {
+const VIBE_IDS = new Set(VIBES.map((v) => v.id));
+
+/**
+ * Map Quick Plan interests → at most **two** vibe cards (scores + tie-break),
+ * so we don't pre-check all four after a rich interest profile.
+ */
+function inferVibesFromInterests(interests: InterestTag[]): string[] {
+  const scores: Record<string, number> = {
+    city: 0,
+    nature: 0,
+    beach: 0,
+    cultural: 0,
+  };
+  for (const i of interests) {
+    if (i === "nature" || i === "adventure") scores.nature += 2;
+    if (i === "history" || i === "art") scores.cultural += 2;
+    if (i === "nightlife" || i === "shopping") scores.city += 2;
+    if (i === "food") scores.city += 1;
+    if (i === "relaxation") scores.beach += 1;
+  }
+  const ranked = (Object.entries(scores) as [string, number][])
+    .filter(([, s]) => s > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (!ranked.length) return [];
+
+  const out: string[] = [];
+  const [first, second] = ranked;
+  if (first && VIBE_IDS.has(first[0])) out.push(first[0]);
+  if (
+    second &&
+    VIBE_IDS.has(second[0]) &&
+    second[1] >= first![1] * 0.72 &&
+    second[1] >= 2
+  ) {
+    out.push(second[0]);
+  }
+  return out;
+}
+
+function combineInterests(vibes: string[], interests: InterestTag[]): InterestTag[] {
   const next = new Set<InterestTag>(interests);
-  if (vibe === "city") {
-    next.add("food");
-    next.add("nightlife");
-  } else if (vibe === "nature") {
-    next.add("nature");
-    next.add("adventure");
-  } else if (vibe === "beach") {
-    next.add("relaxation");
-    next.add("food");
-  } else if (vibe === "cultural") {
-    next.add("history");
-    next.add("art");
+  for (const vibe of vibes) {
+    if (vibe === "city") {
+      next.add("food");
+      next.add("nightlife");
+    } else if (vibe === "nature") {
+      next.add("nature");
+      next.add("adventure");
+    } else if (vibe === "beach") {
+      next.add("relaxation");
+      next.add("food");
+    } else if (vibe === "cultural") {
+      next.add("history");
+      next.add("art");
+    }
   }
   return [...next];
 }
 
-function computePriorityOrder(vibe: string, interests: InterestTag[]): PriorityKey[] {
+function computePriorityOrder(vibes: string[], interests: InterestTag[]): PriorityKey[] {
   if (interests.includes("food")) return ["food", "sightseeing", "relaxation", "shopping"];
   if (interests.includes("shopping")) return ["shopping", "sightseeing", "food", "relaxation"];
-  if (interests.includes("relaxation") || vibe === "beach") {
+  if (interests.includes("relaxation") || vibes.includes("beach")) {
     return ["relaxation", "sightseeing", "food", "shopping"];
   }
   return ["sightseeing", "food", "shopping", "relaxation"];
@@ -254,28 +360,44 @@ function computePriorityOrder(vibe: string, interests: InterestTag[]): PriorityK
 
 type Props = {
   initialDestination?: string;
+  /** When opening from Quick Plan, pass inferred preferences to pre-fill steps. */
+  initialPreferences?: Partial<TripPreferences> | null;
   onAskAi: () => void;
   onBack?: () => void;
 };
 
-export function TravelPlannerWizard({ initialDestination = "", onAskAi, onBack }: Props) {
+export function TravelPlannerWizard({
+  initialDestination = "",
+  initialPreferences = null,
+  onAskAi,
+  onBack,
+}: Props) {
   const router = useRouter();
+  const seed = wizardSeedFromQuickPlan(initialPreferences);
+  const mergedDestination =
+    normalizeDestinationInput(initialPreferences?.destination?.trim() || "") || initialDestination;
+
   const [step, setStep] = useState<Step>("days");
-  const [destination, setDestination] = useState(initialDestination);
-  const [selectedDays, setSelectedDays] = useState<number>(3);
-  const [customDays, setCustomDays] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [flexibleDates, setFlexibleDates] = useState(false);
-  const [selectedVibe, setSelectedVibe] = useState<string>("");
-  const [selectedInterests, setSelectedInterests] = useState<InterestTag[]>([]);
-  const [selectedHotelIds, setSelectedHotelIds] = useState<string[]>([]);
-  const [selectedDining, setSelectedDining] = useState<DiningTag[]>([]);
-  const [travelCompanion, setTravelCompanion] = useState<TravelCompanion>("solo");
-  const [travelPace, setTravelPace] = useState<TravelPace>("moderate");
-  const [morningPreference, setMorningPreference] = useState<MorningPreference>("normal");
-  const [tripSeasonFlexible, setTripSeasonFlexible] = useState(true);
-  const [tripMonth, setTripMonth] = useState("");
-  const [tripYear, setTripYear] = useState("");
+  const [destination, setDestination] = useState(mergedDestination);
+  const [selectedDays, setSelectedDays] = useState<number>(seed.selectedDays);
+  const [customDays, setCustomDays] = useState(() =>
+    (DAY_OPTIONS as readonly number[]).includes(seed.selectedDays) ? "" : String(seed.selectedDays)
+  );
+  const [startDate, setStartDate] = useState(seed.startDate);
+  const [flexibleDates, setFlexibleDates] = useState(seed.flexibleDates);
+  const [selectedVibes, setSelectedVibes] = useState<string[]>(() =>
+    inferVibesFromInterests(seed.selectedInterests)
+  );
+  const [selectedInterests, setSelectedInterests] = useState<InterestTag[]>(seed.selectedInterests);
+  const [selectedDining, setSelectedDining] = useState<DiningTag[]>(seed.selectedDining);
+  const [travelCompanion, setTravelCompanion] = useState<TravelCompanion>(seed.travelCompanion);
+  const [travelPace, setTravelPace] = useState<TravelPace>(seed.travelPace);
+  const [morningPreference, setMorningPreference] = useState<MorningPreference>(seed.morningPreference);
+  const [mobility, setMobility] = useState<TripMobility>(seed.mobility);
+  const [tripSeasonFlexible, setTripSeasonFlexible] = useState(seed.tripSeasonFlexible);
+  const [tripMonth, setTripMonth] = useState(seed.tripMonth);
+  const [tripYear, setTripYear] = useState(seed.tripYear);
+  const [budget] = useState<Budget>(seed.budget);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -292,21 +414,21 @@ export function TravelPlannerWizard({ initialDestination = "", onAskAi, onBack }
   }, [tripSeasonFlexible, tripMonth, tripYear]);
 
   const tripPreferences = useMemo<TripPreferences>(() => {
-    const interests = combineInterests(selectedVibe, selectedInterests);
-    const hotelStyles = HOTELS.filter((item) => selectedHotelIds.includes(item.id)).map((item) => item.title);
+    const interests = combineInterests(selectedVibes, selectedInterests);
     return {
       destination: normalizedDestination || "not_sure",
       tripDays: selectedDays,
       startDate: flexibleDates || !startDate ? undefined : startDate,
       flexibleDates,
-      budget: deriveBudgetFromHotelIds(selectedHotelIds),
-      hotelStyles,
+      budget,
+      hotelStyles: [],
       interests,
       dining: selectedDining,
-      priorityOrder: computePriorityOrder(selectedVibe, interests),
+      priorityOrder: computePriorityOrder(selectedVibes, interests),
       travelCompanion,
       travelPace,
       morningPreference,
+      mobility,
       tripDate: tripDateForSeason,
     };
   }, [
@@ -314,13 +436,14 @@ export function TravelPlannerWizard({ initialDestination = "", onAskAi, onBack }
     selectedDays,
     startDate,
     flexibleDates,
-    selectedVibe,
+    budget,
+    selectedVibes,
     selectedInterests,
-    selectedHotelIds,
     selectedDining,
     travelCompanion,
     travelPace,
     morningPreference,
+    mobility,
     tripDateForSeason,
   ]);
 
@@ -337,8 +460,8 @@ export function TravelPlannerWizard({ initialDestination = "", onAskAi, onBack }
     );
   };
 
-  const toggleHotel = (id: string) => {
-    setSelectedHotelIds((current) =>
+  const toggleVibe = (id: string) => {
+    setSelectedVibes((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
     );
   };
@@ -348,11 +471,9 @@ export function TravelPlannerWizard({ initialDestination = "", onAskAi, onBack }
       case "days":
         return selectedDays > 0;
       case "vibe":
-        return Boolean(selectedVibe);
+        return selectedVibes.length > 0;
       case "interests":
         return selectedInterests.length > 0;
-      case "hotels":
-        return selectedHotelIds.length > 0;
       case "dining":
         return selectedDining.length > 0;
       case "extras":
@@ -372,7 +493,7 @@ export function TravelPlannerWizard({ initialDestination = "", onAskAi, onBack }
   };
 
   const prevStep = () => {
-    if (step === "days") {
+    if (currentStepIndex <= 0) {
       onBack?.();
       return;
     }
@@ -385,9 +506,8 @@ export function TravelPlannerWizard({ initialDestination = "", onAskAi, onBack }
     setCustomDays("");
     setStartDate("");
     setFlexibleDates(false);
-    setSelectedVibe("");
+    setSelectedVibes([]);
     setSelectedInterests([]);
-    setSelectedHotelIds([]);
     setSelectedDining([]);
     setTravelCompanion("solo");
     setTravelPace("moderate");
@@ -407,16 +527,25 @@ export function TravelPlannerWizard({ initialDestination = "", onAskAi, onBack }
     setError("");
     setStep("result");
     try {
+      let prefsToSave = tripPreferences;
+      if (prefsToSave.destinationLat == null || prefsToSave.destinationLng == null) {
+        const c = await fetchDestinationCenter(normalizedDestination);
+        if (c) {
+          prefsToSave = { ...prefsToSave, destinationLat: c.lat, destinationLng: c.lng };
+        }
+      }
+
+      const prefsForApi = mergeSwapHintsForApi(prefsToSave);
       const response = await fetch("/api/generate-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(tripPreferences),
+        body: JSON.stringify(prefsForApi),
       });
       const data = (await response.json()) as { items?: ItineraryItem[]; error?: string };
       if (!response.ok || !data.items?.length) {
         throw new Error(data.error ?? "Failed to generate travel plan");
       }
-      saveTrip({ preferences: tripPreferences, items: data.items });
+      saveTrip({ preferences: prefsForApi, items: data.items });
       router.push("/itinerary");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -539,8 +668,8 @@ export function TravelPlannerWizard({ initialDestination = "", onAskAi, onBack }
           <OptionCard
             key={item.id}
             item={item}
-            selected={selectedVibe === item.id}
-            onClick={() => setSelectedVibe(item.id)}
+            selected={selectedVibes.includes(item.id)}
+            onClick={() => toggleVibe(item.id)}
           />
         ));
       case "interests":
@@ -550,15 +679,6 @@ export function TravelPlannerWizard({ initialDestination = "", onAskAi, onBack }
             item={item}
             selected={selectedInterests.includes(item.value)}
             onClick={() => toggleInterest(item.value)}
-          />
-        ));
-      case "hotels":
-        return HOTELS.map((item) => (
-          <OptionCard
-            key={item.id}
-            item={item}
-            selected={selectedHotelIds.includes(item.id)}
-            onClick={() => toggleHotel(item.id)}
           />
         ));
       case "dining":
@@ -630,6 +750,30 @@ export function TravelPlannerWizard({ initialDestination = "", onAskAi, onBack }
                     onClick={() => setMorningPreference(opt.value)}
                     className={`w-full min-w-0 flex-1 rounded-2xl border-2 p-4 text-left transition-all sm:min-w-[140px] sm:max-w-[200px] ${
                       morningPreference === opt.value
+                        ? "border-primary bg-primary/10 ring-1 ring-primary"
+                        : "border-border/40 bg-card/60 hover:border-foreground/15"
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold text-foreground">{opt.label}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">{opt.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <p className="flex items-center justify-center gap-2 text-center text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                <Car className="h-3.5 w-3.5" />
+                How will you get around?
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center">
+                {MOBILITY_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setMobility(opt.value)}
+                    className={`w-full min-w-0 flex-1 rounded-2xl border-2 p-4 text-left transition-all sm:min-w-[140px] sm:max-w-[220px] ${
+                      mobility === opt.value
                         ? "border-primary bg-primary/10 ring-1 ring-primary"
                         : "border-border/40 bg-card/60 hover:border-foreground/15"
                     }`}

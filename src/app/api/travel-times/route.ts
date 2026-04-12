@@ -21,8 +21,27 @@ type LegResult = {
   nearby?: boolean;
 };
 
+function toCoordNum(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number.parseFloat(v);
+    return Number.isFinite(n) ? n : NaN;
+  }
+  return NaN;
+}
+
 function coordsUsable(lat: number, lng: number): boolean {
   return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
+}
+
+/** JSON/sessionStorage often yields lat/lng as strings — normalize before haversine / Matrix. */
+function withNumericCoords(item: ItineraryItem): ItineraryItem {
+  const lat = toCoordNum(item.lat);
+  const lng = toCoordNum(item.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    return { ...item, lat, lng };
+  }
+  return item;
 }
 
 async function googleMatrixLeg(
@@ -66,11 +85,12 @@ const BATCH = 8;
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as { items?: ItineraryItem[] };
-    const items = body.items;
-    if (!Array.isArray(items) || !items.length) {
+    const rawItems = body.items;
+    if (!Array.isArray(rawItems) || !rawItems.length) {
       return NextResponse.json({ error: "items array required" }, { status: 400 });
     }
 
+    const items = rawItems.map((it) => withNumericCoords(it as ItineraryItem));
     const legs = buildItineraryLegs(items);
     const apiKey = process.env.GOOGLE_PLACES_API_KEY?.trim() ?? "";
 

@@ -34,12 +34,18 @@ export async function POST(req: Request) {
       body.itinerarySummary?.trim() ||
       `Trip to ${prefs.destination}; budget ${prefs.budget}; interests: ${prefs.interests.join(", ")}`;
 
+    const avoidBlock =
+      prefs.swapAvoidHints?.length ?
+        `\n\n### Personalization — honor when possible\n${prefs.swapAvoidHints.map((h) => `- ${h}`).join("\n")}\nPick a replacement that **does not** repeat categories the user clearly rejected (e.g. if they removed museums, prefer a park, market, walk, or non-museum POI).`
+      : "";
+
     const userPrompt = `Destination: ${prefs.destination}
 Budget: ${prefs.budget}
 Accommodation styles: ${prefs.hotelStyles?.join(", ") || "any"}
 Interests: ${prefs.interests.join(", ")}
 Dining: ${prefs.dining.join(", ")}
 Priorities: ${prefs.priorityOrder.join(" > ")}
+${avoidBlock}
 
 Current plan summary:
 ${summary}

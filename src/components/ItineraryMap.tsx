@@ -23,6 +23,10 @@ type Props = {
   items: ItineraryItem[];
   focusedId?: string | null;
   onSelectPin?: (id: string | null) => void;
+  /** If no stop has usable coordinates, geocode this (e.g. city name) so the map is not stuck on the ocean. */
+  fallbackDestination?: string | null;
+  /** When known (e.g. from server Geocoding of destination), center immediately without waiting on client Geocoder. */
+  fallbackCenter?: { lat: number; lng: number } | null;
 };
 
 type LatLng = { lat: number; lng: number };
@@ -68,12 +72,15 @@ declare global {
   }
 }
 
+function numericLatLng(item: ItineraryItem): { lat: number; lng: number } {
+  const lat = typeof item.lat === "number" ? item.lat : Number.parseFloat(String(item.lat));
+  const lng = typeof item.lng === "number" ? item.lng : Number.parseFloat(String(item.lng));
+  return { lat, lng };
+}
+
 function validCoords(item: ItineraryItem): boolean {
-  return (
-    Number.isFinite(item.lat) &&
-    Number.isFinite(item.lng) &&
-    !(item.lat === 0 && item.lng === 0)
-  );
+  const { lat, lng } = numericLatLng(item);
+  return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
 }
 
 function markerIcon(color: string, active: boolean): Record<string, unknown> {
@@ -115,23 +122,109 @@ function ensureGoogleMapsScript(apiKey: string): Promise<void> {
   });
 }
 
-export function ItineraryMap({ items, focusedId, onSelectPin }: Props) {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+/**
+ * New Maps JS bootstrap: `script.onload` can run before `google.maps.Map` exists.
+ * Load core libraries explicitly, then poll until constructors are functions.
+ */
+async function waitForGoogleMapsConstructors(): Promise<void> {
+  const mapsNs = window.google?.maps;
+  if (!mapsNs) {
+    throw new Error("Google Maps script did not define window.google.maps");
+  }
+
+  const importLibrary = (
+    mapsNs as unknown as { importLibrary?: (name: string) => Promise<unknown> }
+  ).importLibrary;
+
+  if (typeof importLibrary === "function") {
+    for (const lib of ["maps", "marker", "geocoding"] as const) {
+      try {
+        await importLibrary.call(mapsNs, lib);
+      } catch {
+        /* optional / unknown library id on older bundles */
+      }
+    }
+  }
+
+  const deadline = Date.now() + 25_000;
+  while (Date.now() < deadline) {
+    const MapCtor = window.google?.maps?.Map;
+    const MarkerCtor = window.google?.maps?.Marker;
+    if (typeof MapCtor === "function" && typeof MarkerCtor === "function") {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 40));
+  }
+
+  throw new Error(
+    "window.google.maps.Map is not a constructor — enable Maps JavaScript API for this key, or wait for the script to finish loading."
+  );
+}
+
+export function ItineraryMap({
+  items,
+  focusedId,
+  onSelectPin,
+  fallbackDestination,
+  fallbackCenter,
+}: Props) {
+  const inlineKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() || "";
+  const [resolvedApiKey, setResolvedApiKey] = useState<string | null>(() =>
+    inlineKey ? inlineKey : null
+  );
+  const [keyResolving, setKeyResolving] = useState(!inlineKey);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
   const markersRef = useRef<GoogleMarker[]>([]);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
-  const validItems = useMemo(() => items.filter(validCoords), [items]);
 
   useEffect(() => {
-    if (!apiKey || !containerRef.current || mapRef.current) return;
+    if (inlineKey) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/maps-key");
+        const data = (await res.json()) as { key?: string | null };
+        if (cancelled) return;
+        const k = data.key?.trim();
+        if (k) {
+          setResolvedApiKey(k);
+          setKeyResolving(false);
+        } else {
+          setResolvedApiKey(null);
+          setKeyResolving(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setResolvedApiKey(null);
+          setKeyResolving(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [inlineKey]);
+  const validItems = useMemo(() => {
+    return items
+      .filter(validCoords)
+      .map((it) => {
+        const { lat, lng } = numericLatLng(it);
+        return { ...it, lat, lng };
+      });
+  }, [items]);
+
+  useEffect(() => {
+    if (!resolvedApiKey || !containerRef.current || mapRef.current) return;
 
     let active = true;
 
     void (async () => {
       try {
-        await ensureGoogleMapsScript(apiKey);
+        await ensureGoogleMapsScript(resolvedApiKey);
+        if (!active || !containerRef.current) return;
+        await waitForGoogleMapsConstructors();
         if (!active || !containerRef.current || !window.google?.maps) return;
 
         const map = new window.google.maps.Map(containerRef.current, {
@@ -146,6 +239,14 @@ export function ItineraryMap({ items, focusedId, onSelectPin }: Props) {
 
         mapRef.current = map;
         setMapReady(true);
+
+        requestAnimationFrame(() => {
+          if (!mapRef.current || !window.google?.maps) return;
+          const evt = (
+            window.google.maps as unknown as { event?: { trigger: (m: GoogleMap, n: string) => void } }
+          ).event;
+          evt?.trigger(mapRef.current, "resize");
+        });
       } catch (error) {
         if (!active) return;
         setMapError(error instanceof Error ? error.message : "Could not load map");
@@ -161,7 +262,7 @@ export function ItineraryMap({ items, focusedId, onSelectPin }: Props) {
       mapRef.current = null;
       setMapReady(false);
     };
-  }, [apiKey]);
+  }, [resolvedApiKey]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current || !window.google?.maps) return;
@@ -190,8 +291,14 @@ export function ItineraryMap({ items, focusedId, onSelectPin }: Props) {
     }
 
     if (validItems.length === 0) {
-      mapRef.current.setCenter(DEFAULT_CENTER);
-      mapRef.current.setZoom(DEFAULT_ZOOM);
+      // Avoid snapping to the Atlantic if we can center on destination hint or coords.
+      const fc = fallbackCenter;
+      const hasCenter =
+        fc && Number.isFinite(fc.lat) && Number.isFinite(fc.lng) && !(fc.lat === 0 && fc.lng === 0);
+      if (!fallbackDestination?.trim() && !hasCenter) {
+        mapRef.current.setCenter(DEFAULT_CENTER);
+        mapRef.current.setZoom(DEFAULT_ZOOM);
+      }
       return;
     }
 
@@ -206,7 +313,45 @@ export function ItineraryMap({ items, focusedId, onSelectPin }: Props) {
       bounds.extend({ lat: item.lat, lng: item.lng });
     }
     mapRef.current.fitBounds(bounds, { top: 48, right: 48, bottom: 48, left: 48 });
-  }, [focusedId, mapReady, onSelectPin, validItems]);
+  }, [focusedId, fallbackCenter, fallbackDestination, mapReady, onSelectPin, validItems]);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !window.google?.maps) return;
+    if (validItems.length > 0) return;
+    const fc = fallbackCenter;
+    if (
+      fc &&
+      Number.isFinite(fc.lat) &&
+      Number.isFinite(fc.lng) &&
+      !(fc.lat === 0 && fc.lng === 0)
+    ) {
+      mapRef.current.setCenter({ lat: fc.lat, lng: fc.lng });
+      mapRef.current.setZoom(11);
+      return;
+    }
+    const addr = fallbackDestination?.trim();
+    if (!addr) return;
+
+    type GeocoderCtor = new () => {
+      geocode: (
+        request: { address: string },
+        callback: (
+          results: { geometry: { location: { lat: () => number; lng: () => number } } }[] | null,
+          status: string
+        ) => void
+      ) => void;
+    };
+    const Maps = window.google.maps as unknown as { Geocoder: GeocoderCtor };
+    if (!Maps.Geocoder) return;
+
+    const geocoder = new Maps.Geocoder();
+    geocoder.geocode({ address: addr }, (results, status) => {
+      if (status !== "OK" || !results?.[0]?.geometry?.location || !mapRef.current) return;
+      const loc = results[0].geometry.location;
+      mapRef.current.setCenter({ lat: loc.lat(), lng: loc.lng() });
+      mapRef.current.setZoom(11);
+    });
+  }, [mapReady, validItems.length, fallbackCenter, fallbackDestination]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current || !focusedId) return;
@@ -218,14 +363,24 @@ export function ItineraryMap({ items, focusedId, onSelectPin }: Props) {
     mapRef.current.setZoom(FOCUS_ZOOM);
   }, [focusedId, mapReady, validItems]);
 
-  if (!apiKey) {
+  if (keyResolving) {
+    return (
+      <div className="flex h-full min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-surface-muted bg-surface p-6 text-center">
+        <p className="text-sm text-ink-muted">Loading map…</p>
+      </div>
+    );
+  }
+
+  if (!resolvedApiKey) {
     return (
       <div className="flex h-full min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-surface-muted bg-surface p-6 text-center">
         <p className="font-display text-base font-semibold text-ink">Map disabled</p>
         <p className="mt-2 max-w-sm text-sm text-ink-muted">
-          Add <code className="rounded bg-surface-muted px-1">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code>{" "}
-          to <code className="rounded bg-surface-muted px-1">.env.local</code> to show itinerary
-          pins.
+          Set <code className="rounded bg-surface-muted px-1">GOOGLE_PLACES_API_KEY</code> or{" "}
+          <code className="rounded bg-surface-muted px-1">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> in{" "}
+          <code className="rounded bg-surface-muted px-1">.env.local</code>, restart{" "}
+          <code className="rounded bg-surface-muted px-1">next dev</code>, and enable{" "}
+          <strong className="text-ink">Maps JavaScript API</strong> for that key in Google Cloud.
         </p>
       </div>
     );

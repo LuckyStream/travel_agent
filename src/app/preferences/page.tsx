@@ -5,7 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { PriorityRanker } from "@/components/PriorityRanker";
 import { SiteHeader } from "@/components/SiteHeader";
+import { fetchDestinationCenter } from "@/lib/fetch-destination-center";
 import { saveTrip } from "@/lib/session-trip";
+import { mergeSwapHintsForApi } from "@/lib/swap-hints-storage";
 import {
   clampTripDays,
   type Budget,
@@ -127,16 +129,25 @@ function PreferencesForm() {
     setError(null);
     setLoading(true);
     try {
+      let prefsToSave = prefs;
+      if (prefsToSave.destinationLat == null || prefsToSave.destinationLng == null) {
+        const c = await fetchDestinationCenter(destination);
+        if (c) {
+          prefsToSave = { ...prefsToSave, destinationLat: c.lat, destinationLng: c.lng };
+        }
+      }
+
+      const prefsForApi = mergeSwapHintsForApi(prefsToSave);
       const res = await fetch("/api/generate-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(prefs),
+        body: JSON.stringify(prefsForApi),
       });
       const data = (await res.json()) as { items?: ItineraryItem[]; error?: string };
       if (!res.ok || !data.items?.length) {
         throw new Error(data.error ?? "Generation failed");
       }
-      saveTrip({ preferences: prefs, items: data.items });
+      saveTrip({ preferences: prefsForApi, items: data.items });
       router.push("/itinerary");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not generate plan");

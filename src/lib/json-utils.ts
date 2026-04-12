@@ -83,3 +83,36 @@ function extractFirstJsonBlock(input: string): string | null {
 
   return input.slice(start);
 }
+
+/**
+ * Parse a fetch `Response` as JSON without throwing when the body is HTML or plain text (e.g. a 500 page).
+ */
+export async function parseFetchJson<T>(res: Response): Promise<
+  | { ok: true; data: T; status: number }
+  | { ok: false; status: number; error: string; data?: T }
+> {
+  const text = await res.text();
+  let data: T;
+  try {
+    data = JSON.parse(text) as T;
+  } catch {
+    const hint = text.trim().slice(0, 160).replace(/\s+/g, " ");
+    return {
+      ok: false,
+      status: res.status,
+      error:
+        res.status >= 500
+          ? `Server error (${res.status})${hint ? `: ${hint}` : ""}`
+          : `Invalid response (${res.status})${hint ? `: ${hint}` : ""}`,
+    };
+  }
+  if (!res.ok) {
+    const errObj = data as { error?: string };
+    const err =
+      typeof errObj?.error === "string" && errObj.error.trim()
+        ? errObj.error.trim()
+        : `Request failed (${res.status})`;
+    return { ok: false, status: res.status, error: err, data };
+  }
+  return { ok: true, data, status: res.status };
+}
