@@ -18,21 +18,6 @@ const heroSlides = [
   { image: "/hero-slides/34-zanzibar.jpg", alt: "Zanzibar tropical beach" },
 ] as const;
 
-const months = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-] as const;
-
 type ActiveView = "home" | "quick" | "wizard";
 
 export default function HomePage() {
@@ -117,6 +102,22 @@ export default function HomePage() {
     return () => cancelAnimationFrame(id);
   }, [activeView, quickSessionKey]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const forceHome = params.get("home") === "1";
+    if (forceHome) {
+      setActiveView("home");
+      setWizardFromQuick(false);
+      setWizardInitialPrefs(null);
+    }
+    const presetDestination = params.get("destination")?.trim() ?? "";
+    if (presetDestination) setSearchQuery(presetDestination);
+    if (forceHome || presetDestination) {
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, "", cleanUrl);
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <SiteHeader />
@@ -151,7 +152,7 @@ export default function HomePage() {
             <div className="relative z-30 flex h-full max-w-7xl flex-col justify-end px-6 pb-20 md:px-16 lg:px-24">
               <div className="pointer-events-auto">
                 <p className="mb-3 text-xs font-medium uppercase tracking-[0.3em] text-primary-foreground/60">
-                  YOUR PERSONAL TRAVELING AGENT
+                  R.O.A.M
                 </p>
                 <h1 className="mb-4 max-w-5xl font-display text-4xl font-bold italic leading-[1.02] tracking-tight text-primary-foreground md:text-5xl lg:text-6xl">
                   Van Trips around the world,
@@ -225,46 +226,30 @@ export default function HomePage() {
             </div>
           </section>
 
-          <section className="relative z-0 border-t border-border">
-            <div className="mx-auto max-w-7xl px-4 py-16 md:px-8 md:py-20">
-              <div className="mb-10 text-center">
-                <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.3em] text-muted-foreground">
-                  When do you want to travel?
-                </p>
-              </div>
-              <div className="flex flex-wrap justify-center gap-2">
-                {months.map((month) => (
-                  <button
-                    key={month}
-                    type="button"
-                    className="rounded-full border border-border px-5 py-2 text-xs font-medium tracking-wide text-muted-foreground transition-all duration-300 hover:border-primary hover:bg-primary hover:text-primary-foreground hover:shadow-[0_4px_14px_rgba(0,0,0,0.1)]"
-                  >
-                    {month}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </section>
-        </main>
-      ) : activeView === "quick" ? (
-        <main id="quick-plan-anchor" className="min-h-screen scroll-mt-4 bg-background">
-          <QuickPlanChat
-            key={quickSessionKey}
-            initialDestination={planDestination}
-            onBack={handleBackToHome}
-            onOpenFullPlanner={openWizardFromQuickPlan}
-          />
         </main>
       ) : (
-        <main className="min-h-screen">
-          <TravelPlannerWizard
-            key={wizardSessionKey}
-            initialDestination={planDestination}
-            initialPreferences={wizardInitialPrefs ?? undefined}
-            onAskAi={() => setChatOpen(true)}
-            onBack={handleWizardExit}
-          />
-        </main>
+        <>
+          <main
+            id="quick-plan-anchor"
+            className={`min-h-screen scroll-mt-4 bg-background ${activeView === "quick" ? "" : "hidden"}`}
+          >
+            <QuickPlanChat
+              key={quickSessionKey}
+              initialDestination={planDestination}
+              onBack={handleBackToHome}
+              onOpenFullPlanner={openWizardFromQuickPlan}
+            />
+          </main>
+          <main className={`min-h-screen ${activeView === "wizard" ? "" : "hidden"}`}>
+            <TravelPlannerWizard
+              key={wizardSessionKey}
+              initialDestination={planDestination}
+              initialPreferences={wizardInitialPrefs ?? undefined}
+              onAskAi={() => setChatOpen(true)}
+              onBack={handleWizardExit}
+            />
+          </main>
+        </>
       )}
 
       <DestinationChat

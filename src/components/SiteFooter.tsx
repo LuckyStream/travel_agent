@@ -3,8 +3,6 @@ import Link from "next/link";
 const footerLinks = [
   { label: "Destinations", href: "/destinations" },
   { label: "How It Works", href: "/how-it-works" },
-  { label: "Preferences", href: "/preferences" },
-  { label: "Itinerary", href: "/itinerary" },
 ];
 
 export function SiteFooter() {
@@ -14,7 +12,7 @@ export function SiteFooter() {
         <div className="grid gap-12 md:grid-cols-2 lg:grid-cols-4">
           <div>
             <span className="block font-display text-2xl font-bold italic text-primary-foreground">
-              Personal Traveling Agent
+              R.O.A.M
             </span>
             <p className="mt-4 text-sm leading-7 text-primary-foreground/55">
               A Lovable-inspired frontend powered by the recommendation and itinerary code already
@@ -61,7 +59,7 @@ export function SiteFooter() {
 
         <div className="mt-12 border-t border-primary-foreground/10 pt-8 text-center">
           <p className="text-xs tracking-[0.2em] text-primary-foreground/35">
-            © 2026 Personal Traveling Agent
+            © 2026 R.O.A.M
           </p>
         </div>
       </div>

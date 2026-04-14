@@ -3,7 +3,7 @@ import "./globals.css";
 import { SiteFooter } from "@/components/SiteFooter";
 
 export const metadata: Metadata = {
-  title: "Personal Traveling Agent",
+  title: "R.O.A.M",
   description: "Lovable-style travel planning with AI-assisted recommendations and itinerary building",
 };
 

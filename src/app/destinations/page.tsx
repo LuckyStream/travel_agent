@@ -86,7 +86,7 @@ export default function DestinationsPage() {
                     {destination.blurb}
                   </p>
                   <Link
-                    href={`/preferences?destination=${encodeURIComponent(destination.name)}`}
+                    href={`/?destination=${encodeURIComponent(destination.name)}`}
                     className="mt-5 inline-flex rounded-full bg-earth-olive px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90"
                   >
                     Start planning

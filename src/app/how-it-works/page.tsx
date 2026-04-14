@@ -87,12 +87,6 @@ export default function HowItWorksPage() {
               >
                 Back to home
               </Link>
-              <Link
-                href="/preferences"
-                className="rounded-full border border-primary-foreground/20 px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary-foreground/10"
-              >
-                Open planner
-              </Link>
             </div>
           </div>
         </section>

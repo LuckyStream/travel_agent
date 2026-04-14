@@ -1,5 +1,6 @@
+"use client";
+
 import Link from "next/link";
-import { Search } from "lucide-react";
 
 export function SiteHeader() {
   return (
@@ -18,36 +19,19 @@ export function SiteHeader() {
           >
             How It Works
           </Link>
-          <Link
-            href="/itinerary"
-            className="text-sm font-medium tracking-wide text-foreground/70 transition hover:text-foreground"
-          >
-            Itinerary
-          </Link>
         </nav>
 
         <Link
-          href="/"
-          className="md:absolute md:left-1/2 md:-translate-x-1/2 font-display text-xl font-bold italic tracking-tight text-foreground lg:text-2xl"
+          href="/?home=1"
+          onClick={(e) => {
+            e.preventDefault();
+            window.location.assign("/?home=1");
+          }}
+          className="md:absolute md:left-1/2 md:-translate-x-1/2 font-display text-[2.35rem] font-bold italic tracking-tight text-foreground lg:text-[2.9rem]"
         >
-          Your Personal Traveling Agent
+          R.O.A.M.
         </Link>
 
-        <nav className="flex items-center gap-4 text-sm">
-          <Link
-            href="/destinations"
-            className="hidden items-center gap-3 font-medium text-foreground/70 transition hover:text-foreground md:inline-flex"
-          >
-            <Search className="h-4 w-4" />
-            <span>Search</span>
-          </Link>
-          <Link
-            href="/#plan-trip"
-            className="rounded-full border border-earth-olive/30 bg-earth-olive px-4 py-2 font-medium text-primary-foreground transition hover:opacity-90"
-          >
-            Start planning
-          </Link>
-        </nav>
       </div>
     </header>
   );
